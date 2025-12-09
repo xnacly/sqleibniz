@@ -28,7 +28,7 @@ mod types;
 
 /// LSP and analysis cli for sql. Check for valid syntax, semantics and perform dynamic analysis.
 #[derive(clap::Parser)]
-#[command(about, long_about=None)]
+#[command(about, version, long_about=None)]
 struct Cli {
     /// instruct sqleibniz to ignore the configuration, if specified
     #[arg(short, long)]

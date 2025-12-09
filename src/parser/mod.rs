@@ -330,16 +330,26 @@ impl<'a> Parser<'a> {
             }
             Type::Ident(_) => {
                 if let Type::Ident(name) = &self.cur()?.ttype {
-                    self.errors.push(self.err(
-                        "Unknown Keyword",
-                        &format!(
-                            "'{}' is not a know keyword, did you mean: \n\t- {}",
-                            name,
-                            Keyword::suggestions(name).join("\n\t- ").as_str()
-                        ),
-                        self.cur()?,
-                        Rule::UnknownKeyword,
-                    ));
+                    let suggestions = Keyword::suggestions(name);
+                    if !suggestions.is_empty() {
+                        self.errors.push(self.err(
+                            "Unknown Keyword",
+                            &format!(
+                                "'{}' is not a known keyword, did you mean: \n\t- {}",
+                                name,
+                                suggestions.join("\n\t- ").as_str()
+                            ),
+                            self.cur()?,
+                            Rule::UnknownKeyword,
+                        ));
+                    } else {
+                        self.errors.push(self.err(
+                            "Unknown Keyword",
+                            &format!("'{name}' is not a known keyword"),
+                            self.cur()?,
+                            Rule::UnknownKeyword,
+                        ));
+                    }
                 }
                 self.skip_until_semicolon_or_eof();
                 None

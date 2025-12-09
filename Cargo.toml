@@ -2,7 +2,7 @@
 name = "sqleibniz"
 version = "0.1.0"
 edition = "2021"
-description = "SQL LSP implementation and analysis tool"
+description = "Static analysis and LSP for SQL in Rust"
 repository = "https://github.com/xnacly/sqleibniz"
 license = "MIT"
 

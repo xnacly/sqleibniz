@@ -27,7 +27,7 @@ pub struct Parser<'a> {
 
 /// wrap argument in Some(Box::new(_))
 macro_rules! some_box {
-    ($expr:expr) => {
+    ($expr:expr_2021) => {
         Some(Box::new($expr) as Box<dyn nodes::Node>)
     };
 }

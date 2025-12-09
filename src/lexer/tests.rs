@@ -1,6 +1,6 @@
 #[allow(unused_macros)]
 macro_rules! test_group_pass_assert {
-    ($group_name:ident,$($ident:ident:$input:literal=$expected:expr),*) => {
+    ($group_name:ident,$($ident:ident:$input:literal=$expected:expr_2021),*) => {
     mod $group_name {
         use crate::{lexer, types::Type};
 

@@ -4,11 +4,13 @@ use proc::trace;
 
 use crate::{
     error::{Error, ImprovedLine},
-    types::{rules::Rule, storage::SqliteStorageClass, Keyword, Token, Type},
+    types::{Keyword, Token, Type, rules::Rule, storage::SqliteStorageClass},
 };
 
+/// implement serialisation manually for all nodes and contained types
+pub mod debug;
 /// nodes holds all abstract syntax tree nodes, the node! macro, the lua preparation for the plugin execution and the sqleibniz analysis
-mod nodes;
+pub mod nodes;
 mod tests;
 
 // this sucks but is necessary to track the call depth for indentation when printing the parser

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::lev;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, serde::Serialize)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Keyword {

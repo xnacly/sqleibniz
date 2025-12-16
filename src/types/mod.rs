@@ -9,7 +9,7 @@ pub mod storage;
 /// private identifiers, rust you are fucking weird
 pub use self::keyword::Keyword;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum Type {
     /// Any and all keywords sqlite3 allows for, such as `SELECT`, `FROM`, etc.
     ///
@@ -110,10 +110,59 @@ pub enum Type {
     Eof,
 }
 
-#[derive(Debug, Clone)]
+use std::cmp::PartialEq;
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        use Type::*;
+        match (self, other) {
+            (Keyword(a), Keyword(b)) => a == b,
+            (Ident(a), Ident(b)) => a == b,
+            (Number(a), Number(b)) => a == b,
+            (String(a), String(b)) => a == b,
+            (Blob(a), Blob(b)) => a == b,
+            (Boolean(a), Boolean(b)) => a == b,
+            (ParamName(a), ParamName(b)) => a == b,
+            (Param(a), Param(b)) => a == b,
+            (Dot, Dot) => true,
+            (Asterisk, Asterisk) => true,
+            (Semicolon, Semicolon) => true,
+            (Percent, Percent) => true,
+            (Comma, Comma) => true,
+            (Equal, Equal) => true,
+            (Question, Question) => true,
+            (Colon, Colon) => true,
+            (At, At) => true,
+            (Dollar, Dollar) => true,
+            (BraceLeft, BraceLeft) => true,
+            (BraceRight, BraceRight) => true,
+            (BracketLeft, BracketLeft) => true,
+            (BracketRight, BracketRight) => true,
+            (InstructionExpect, InstructionExpect) => true,
+            (Eof, Eof) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Type {}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Token {
     pub ttype: Type,
     pub start: usize,
     pub end: usize,
     pub line: usize,
+}
+
+impl Token {
+    // #[cfg(test)]
+    pub fn new(ttype: Type) -> Self {
+        Self {
+            ttype,
+            start: 0,
+            end: 0,
+            line: 0,
+        }
+    }
 }

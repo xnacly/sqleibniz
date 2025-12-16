@@ -1,13 +1,5 @@
-use crate::types::{storage::SqliteStorageClass, Keyword, Token};
-
-/// SchemaTableContainer contains either schema_name.table_name or table_name
-#[derive(Debug)]
-pub enum SchemaTableContainer {
-    /// schema_name.table_name
-    SchemaAndTable { schema: String, table: String },
-    /// table_name
-    Table(String),
-}
+use crate::parser::debug::FieldSerializable;
+use crate::types::{Keyword, Token, Type, storage::SqliteStorageClass};
 
 /// Generates a Node from the given input:
 ///
@@ -52,6 +44,7 @@ macro_rules! node {
                 pub $field_name: $field_type,
             )*
         }
+
         impl Node for $node_name {
             fn token(&self) -> &Token {
                 &self.t
@@ -69,6 +62,34 @@ macro_rules! node {
             fn name(&self) -> &str {
                 stringify!($node_name)
             }
+
+            fn as_serializable(&self) -> serde_json::Value {
+                let mut map = serde_json::Map::new();
+                map.insert("type".to_string(), serde_json::Value::String(stringify!($node_name).to_string()));
+
+                $(
+                    map.insert(stringify!($field_name).to_string(), self.$field_name.field_as_serializable());
+                )*
+
+                serde_json::Value::Object(map)
+            }
+        }
+
+        impl $node_name {
+            // #[cfg(test)]
+            pub fn new($($field_name: $field_type,)*) -> Self {
+                Self {
+                    // Type::InstructionExpect is always used in tests
+                    t: Token::new(Type::InstructionExpect),
+                    $($field_name,)*
+                }
+            }
+        }
+
+        impl FieldSerializable for $node_name {
+            fn field_as_serializable(&self) -> serde_json::Value {
+                self.as_serializable()
+            }
         }
     };
 }
@@ -78,6 +99,7 @@ pub trait Node: std::fmt::Debug {
     #[cfg(feature = "trace")]
     fn display(&self, indent: usize);
     fn name(&self) -> &str;
+    fn as_serializable(&self) -> serde_json::Value;
     // TODO: every node should analyse its own contents after the ast was build, to do so the Node
     // trait should enforce a analyse(&self, ctx &types::ctx::Context) -> Vec<Error> function.
 }
@@ -88,6 +110,13 @@ node!(
 );
 
 node!(
+    BindParameter,
+    "Bind parameter: https://www.sqlite.org/lang_expr.html#parameters",
+    counter: Option<Box<dyn Node>>,
+    name: Option<String>
+);
+
+node!(
     Expr,
     "Expr expression, see: https://www.sqlite.org/lang_expr.html#varparam",
     literal: Option<Token>,
@@ -95,13 +124,6 @@ node!(
     schema: Option<String>,
     table: Option<String>,
     column: Option<String>
-);
-
-node!(
-    BindParameter,
-    "Bind parameter: https://www.sqlite.org/lang_expr.html#parameters",
-    counter: Option<Box<dyn Node>>,
-    name: Option<String>
 );
 
 node!(
@@ -167,6 +189,15 @@ node!(
     expr: Expr
 );
 
+/// SchemaTableContainer contains either schema_name.table_name or table_name
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub enum SchemaTableContainer {
+    /// schema_name.table_name
+    SchemaAndTable { schema: String, table: String },
+    /// table_name
+    Table(String),
+}
+
 node!(
     Reindex,
     "Reindex stmt, see: https://www.sqlite.org/lang_reindex.html",
@@ -181,7 +212,7 @@ SQLite supports a limited subset of ALTER TABLE. The ALTER TABLE command in SQLi
     rename_to: Option<String>,
     rename_column_target: Option<String>,
     new_column_name: Option<String>,
-    add_column: Option<ColumnDef>, // TODO: think about a data structure for this
+    add_column: Option<ColumnDef>,
     drop_column: Option<String>
 );
 

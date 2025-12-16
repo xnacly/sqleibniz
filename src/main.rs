@@ -51,6 +51,9 @@ struct Cli {
     #[clap(value_enum)]
     disable: Option<Vec<Rule>>,
 
+    #[arg(long)]
+    dump_ast: bool,
+
     /// invoke sqleibniz as a language server
     #[arg(long)]
     lsp: bool,
@@ -188,16 +191,26 @@ fn main() {
             println!("{:=^72}", " CALLSTACK ");
             let mut parser = parser::Parser::new(toks.clone(), file.name.as_str());
             #[cfg(not(feature = "trace"))]
-            let _ = parser.parse();
+            let ast = parser.parse();
             #[cfg(feature = "trace")]
             {
-                let ast = parser.parse();
                 println!("{:=^72}", " AST ");
                 for node in ast {
                     if let Some(node) = node {
                         node.display(0);
                     }
                 }
+            }
+            if args.dump_ast {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &ast.into_iter()
+                            .flat_map(|n| { n.map(|n| n.as_serializable()) })
+                            .collect::<Vec<_>>()
+                    )
+                    .unwrap_or_default()
+                );
             }
             errors.push(parser.errors);
         }

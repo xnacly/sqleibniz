@@ -4,7 +4,7 @@ use crate::{
 };
 
 /// impl FieldSerializable for $tt via serde_json::to_value(self).unwrap()
-macro_rules! impl_field_serializable_with_serde_dotdot_to_value {
+macro_rules! impl_field_serializable_with_serde_to_value {
     ($($tt:tt),*) => {
         $(
             impl FieldSerializable for $tt {
@@ -20,14 +20,19 @@ pub trait FieldSerializable {
     fn field_as_serializable(&self) -> serde_json::Value;
 }
 
-impl_field_serializable_with_serde_dotdot_to_value!(
+impl_field_serializable_with_serde_to_value!(
     String,
     bool,
-    Token,
     Keyword,
     SqliteStorageClass,
     SchemaTableContainer
 );
+
+impl FieldSerializable for Token {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::to_value(&self.ttype).unwrap()
+    }
+}
 
 impl FieldSerializable for Box<dyn Node> {
     fn field_as_serializable(&self) -> serde_json::Value {

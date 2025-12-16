@@ -96,40 +96,55 @@ mod should_pass {
         begin_exclusive_transaction: r"BEGIN EXCLUSIVE TRANSACTION;"=vec![Begin::new(Some(Keyword::EXCLUSIVE))]
     }
 
-    // test_group_pass_assert! {
-    //     commit_stmt,
-    //     commit:            r"COMMIT;"=vec![Type::Keyword(Keyword::COMMIT)],
-    //     end:               r"END;"=vec![Type::Keyword(Keyword::END)],
-    //     commit_transaction:r"COMMIT TRANSACTION;"=vec![Type::Keyword(Keyword::COMMIT)],
-    //     end_transaction:   r"END TRANSACTION;"=vec![Type::Keyword(Keyword::END)]
-    // }
+    test_group_pass_assert! {
+        commit_stmt,
+        commit:            r"COMMIT;"=vec![Commit::new()],
+        end:               r"END;"=vec![Commit::new()],
+        commit_transaction:r"COMMIT TRANSACTION;"=vec![Commit::new()],
+        end_transaction:   r"END TRANSACTION;"=vec![Commit::new()]
+    }
 
-    // test_group_pass_assert! {
-    //     rollback_stmt,
+    test_group_pass_assert! {
+        rollback_stmt,
 
-    //     rollback:r"ROLLBACK;"=vec![Type::Keyword(Keyword::ROLLBACK)],
-    //     rollback_to_save_point:r"ROLLBACK TO save_point;"=vec![Type::Keyword(Keyword::ROLLBACK)],
-    //     rollback_to_savepoint_save_point:r"ROLLBACK TO SAVEPOINT save_point;"=vec![Type::Keyword(Keyword::ROLLBACK)],
-    //     rollback_transaction:r"ROLLBACK TRANSACTION;"=vec![Type::Keyword(Keyword::ROLLBACK)],
-    //     rollback_transaction_to_save_point:r"ROLLBACK TRANSACTION TO save_point;"=vec![Type::Keyword(Keyword::ROLLBACK)],
-    //     rollback_transaction_to_savepoint_save_point:r"ROLLBACK TRANSACTION TO SAVEPOINT save_point;"=vec![Type::Keyword(Keyword::ROLLBACK)]
-    // }
+        rollback:r"ROLLBACK;"=vec![Rollback::new(None)],
+        rollback_to_save_point:r"ROLLBACK TO save_point;"=vec![Rollback::new(Some("save_point".into()))],
+        rollback_to_savepoint_save_point:r"ROLLBACK TO SAVEPOINT save_point;"=vec![Rollback::new(Some("save_point".into()))],
+        rollback_transaction:r"ROLLBACK TRANSACTION;"=vec![Rollback::new(None)],
+        rollback_transaction_to_save_point:r"ROLLBACK TRANSACTION TO save_point;"=vec![Rollback::new(Some("save_point".into()))],
+        rollback_transaction_to_savepoint_save_point:r"ROLLBACK TRANSACTION TO SAVEPOINT save_point;"=vec![Rollback::new(Some("save_point".into()))]
+    }
 
-    // test_group_pass_assert! {
-    //     detach_stmt,
+    test_group_pass_assert! {
+        detach_stmt,
 
-    //     detach_schema_name:r"DETACH schema_name;"=vec![Type::Keyword(Keyword::DETACH)],
-    //     detach_database_schema_name:r"DETACH DATABASE schema_name;"=vec![Type::Keyword(Keyword::DETACH)]
-    // }
+        detach_schema_name:r"DETACH schema_name;"=vec![Detach::new("schema_name".into())],
+        detach_database_schema_name:r"DETACH DATABASE schema_name;"=vec![Detach::new("schema_name".into())]
+    }
 
-    // test_group_pass_assert! {
-    //     analyze_stmt,
+    test_group_pass_assert! {
+        analyze_stmt,
 
-    //     analyze:r"ANALYZE;"=vec![Type::Keyword(Keyword::ANALYZE)],
-    //     analyze_schema_name:r"ANALYZE schema_name;"=vec![Type::Keyword(Keyword::ANALYZE)],
-    //     analyze_index_or_table_name:r"ANALYZE index_or_table_name;"=vec![Type::Keyword(Keyword::ANALYZE)],
-    //     analyze_schema_name_with_subtable:r"ANALYZE schema_name.index_or_table_name;"=vec![Type::Keyword(Keyword::ANALYZE)]
-    // }
+        analyze:r"ANALYZE;"=vec![Analyze::new(None)],
+        analyze_schema_name:r"ANALYZE schema_name;"=vec![
+            Analyze::new(
+                Some(SchemaTableContainer::Table("schema_name".into())),
+            ),
+        ],
+        analyze_index_or_table_name:r"ANALYZE index_or_table_name;"=vec![
+            Analyze::new(
+                Some(SchemaTableContainer::Table("index_or_table_name".into()))
+            )
+        ],
+        analyze_schema_name_with_subtable:r"ANALYZE schema_name.index_or_table_name;"=vec![
+            Analyze::new(
+                Some(SchemaTableContainer::SchemaAndTable {
+                    schema: "schema_name".into(),
+                    table: "index_or_table_name".into(),
+                })
+            )
+        ]
+    }
 
     // test_group_pass_assert! {
     //     drop_stmt,

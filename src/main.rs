@@ -184,8 +184,6 @@ fn main() {
         let mut ignored_errors = 0;
         let mut lexer = Lexer::new(&content, file.name.as_str());
         let toks = lexer.run();
-        #[cfg(feature = "trace")]
-        dbg!(&toks);
         errors.push(lexer.errors);
 
         if !toks.is_empty() {

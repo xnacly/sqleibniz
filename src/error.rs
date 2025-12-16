@@ -2,7 +2,7 @@ use std::{fs, io::BufRead, path::PathBuf};
 
 use crate::{
     highlight::{builder, highlight},
-    types::{rules::Rule, Token},
+    types::{Token, rules::Rule},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,7 +165,7 @@ impl Error {
             &format!(
                 " {}{} error occurs here.\n",
                 " ".repeat(self.start),
-                "^".repeat(repeat)
+                "~".repeat(repeat)
             ),
             Color::Red,
         );

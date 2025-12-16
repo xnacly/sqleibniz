@@ -3,7 +3,7 @@ macro_rules! test_group_pass_assert {
     ($group_name:ident,$($ident:ident:$input:literal=$expected:expr),*) => {
     mod $group_name {
         #[allow(unused_imports)]
-        use crate::{lexer, parser::Parser, parser::nodes::*};
+        use crate::{lexer, parser::Parser, parser::nodes::*, types::*};
 
         $(
             #[test]
@@ -54,19 +54,34 @@ mod should_pass {
         "=vec![Explain::new(Box::new(Vacuum::new(None, None)))]
     }
 
-    // test_group_pass_assert! {
-    //     sql_stmt_prefix,
-    //     explain: r#"EXPLAIN VACUUM;"#=vec![Type::Keyword(Keyword::EXPLAIN)],
-    //     explain_query_plan: r#"EXPLAIN QUERY PLAN VACUUM;"#=vec![Type::Keyword(Keyword::EXPLAIN)]
-    // }
+    test_group_pass_assert! {
+        sql_stmt_prefix,
+        explain: r#"EXPLAIN VACUUM;"#=vec![Explain::new(Box::new(Vacuum::new(None, None)))],
+        explain_query_plan: r#"EXPLAIN QUERY PLAN VACUUM;"#=vec![Explain::new(Box::new(Vacuum::new(None, None)))]
+    }
 
-    // test_group_pass_assert! {
-    //     vacuum,
-    //     vacuum_first_path: r#"VACUUM;"#=vec![Type::Keyword(Keyword::VACUUM)],
-    //     vacuum_second_path: r#"VACUUM schema_name;"#=vec![Type::Keyword(Keyword::VACUUM)],
-    //     vacuum_third_path: r#"VACUUM INTO 'filename';"#=vec![Type::Keyword(Keyword::VACUUM)],
-    //     vacuum_full_path: r#"VACUUM schema_name INTO 'filename';"#=vec![Type::Keyword(Keyword::VACUUM)]
-    // }
+    test_group_pass_assert! {
+        vacuum,
+        vacuum_first_path: r#"VACUUM;"#=vec![Vacuum::new(None, None)],
+        vacuum_second_path: r#"VACUUM schema_name;"#=vec![
+            Vacuum::new(
+                Some(Token::new(Type::Ident("schema_name".into()))),
+                None,
+            )
+        ],
+        vacuum_third_path: r#"VACUUM INTO 'filename';"#=vec![
+            Vacuum::new(
+                None,
+                Some(Token::new(Type::String("filename".into()))),
+            )
+        ],
+        vacuum_full_path: r#"VACUUM schema_name INTO 'filename';"#=vec![
+            Vacuum::new(
+                Some(Token::new(Type::Ident("schema_name".into()))),
+                Some(Token::new(Type::String("filename".into()))),
+            )
+        ]
+    }
 
     // test_group_pass_assert! {
     //     begin_stmt,

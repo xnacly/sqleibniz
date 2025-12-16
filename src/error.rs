@@ -215,7 +215,23 @@ impl Error {
 
         print_str_colored(b, "    |\n", Color::Blue);
         print_str_colored(b, "    ~ note: ", Color::Blue);
-        b.write_str(&self.note);
+
+        let mut line_len = 0;
+        for word in self.note.split_whitespace() {
+            let word_len = word.len();
+            if line_len + word_len + if line_len > 0 { 1 } else { 0 } > 55 {
+                b.write_str("\n            ");
+                b.write_str(word);
+                line_len = word_len;
+            } else {
+                if line_len > 0 {
+                    b.write_char(' ');
+                    line_len += 1;
+                }
+                b.write_str(word);
+                line_len += word_len;
+            }
+        }
         b.write_char('\n');
 
         print_str_colored(b, "  * ", Color::Blue);

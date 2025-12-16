@@ -137,6 +137,7 @@ node!(Vacuum,"Vacuum stmt, see: https://www.sqlite.org/lang_vacuum.html", schema
 node!(
     Begin,
     "Begin stmt, see: https://www.sqlite.org/syntax/begin-stmt.html",
+    transaction_kind: Option<Keyword>
 );
 
 node!(

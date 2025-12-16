@@ -839,20 +839,29 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/begin-stmt.html
     #[trace]
     fn begin_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let begin: nodes::Begin = nodes::Begin {
+        let mut begin: nodes::Begin = nodes::Begin {
             t: self.cur()?.clone(),
+            transaction_kind: None,
         };
 
         // skip BEGIN
         self.advance();
 
         // skip modifiers
-        match self.cur()?.ttype {
+        let ct = &self.cur()?.ttype;
+        match ct {
             // only BEGIN
             Type::Semicolon => return some_box!(begin),
             Type::Keyword(Keyword::DEFERRED)
             | Type::Keyword(Keyword::IMMEDIATE)
-            | Type::Keyword(Keyword::EXCLUSIVE) => self.advance(),
+            | Type::Keyword(Keyword::EXCLUSIVE) => {
+                begin.transaction_kind = if let Type::Keyword(word) = ct {
+                    Some(word.clone())
+                } else {
+                    None
+                };
+                self.advance()
+            }
             _ => {}
         }
 

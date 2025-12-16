@@ -83,18 +83,18 @@ mod should_pass {
         ]
     }
 
-    // test_group_pass_assert! {
-    //     begin_stmt,
-    //     begin: r#"BEGIN;"#=vec![Type::Keyword(Keyword::BEGIN)],
-    //     begin_transaction: r#"BEGIN TRANSACTION;"#=vec![Type::Keyword(Keyword::BEGIN)],
-    //     begin_deferred: r#"BEGIN DEFERRED;"#=vec![Type::Keyword(Keyword::BEGIN)],
-    //     begin_immediate: r#"BEGIN IMMEDIATE;"#=vec![Type::Keyword(Keyword::BEGIN)],
-    //     begin_exclusive: r#"BEGIN EXCLUSIVE;"#=vec![Type::Keyword(Keyword::BEGIN)],
+    test_group_pass_assert! {
+        begin_stmt,
+        begin: r#"BEGIN;"#=vec![Begin::new(None)],
+        begin_transaction: r#"BEGIN TRANSACTION;"#=vec![Begin::new(None)],
+        begin_deferred: r#"BEGIN DEFERRED;"#=vec![Begin::new(Some(Keyword::DEFERRED))],
+        begin_immediate: r#"BEGIN IMMEDIATE;"#=vec![Begin::new(Some(Keyword::IMMEDIATE))],
+        begin_exclusive: r#"BEGIN EXCLUSIVE;"#=vec![Begin::new(Some(Keyword::EXCLUSIVE))],
 
-    //     begin_deferred_transaction: r"BEGIN DEFERRED TRANSACTION;"=vec![Type::Keyword(Keyword::BEGIN)],
-    //     begin_immediate_transaction: r"BEGIN IMMEDIATE TRANSACTION;"=vec![Type::Keyword(Keyword::BEGIN)],
-    //     begin_exclusive_transaction: r"BEGIN EXCLUSIVE TRANSACTION;"=vec![Type::Keyword(Keyword::BEGIN)]
-    // }
+        begin_deferred_transaction: r"BEGIN DEFERRED TRANSACTION;"=vec![Begin::new(Some(Keyword::DEFERRED))],
+        begin_immediate_transaction: r"BEGIN IMMEDIATE TRANSACTION;"=vec![Begin::new(Some(Keyword::IMMEDIATE))],
+        begin_exclusive_transaction: r"BEGIN EXCLUSIVE TRANSACTION;"=vec![Begin::new(Some(Keyword::EXCLUSIVE))]
+    }
 
     // test_group_pass_assert! {
     //     commit_stmt,

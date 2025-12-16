@@ -29,7 +29,7 @@ pub struct Parser<'a> {
 
 /// wrap argument in Some(Box::new(_))
 macro_rules! some_box {
-    ($expr:expr_2021) => {
+    ($expr:expr) => {
         Some(Box::new($expr) as Box<dyn nodes::Node>)
     };
 }
@@ -240,9 +240,13 @@ impl<'a> Parser<'a> {
             {
                 // skip all token until the statement ends
                 self.skip_until_semicolon_or_eof();
-                // skip ';'
-                self.consume(Type::Semicolon);
-                continue;
+                // only consume ; if we arent at an eof, otherwise we want the last comment of a
+                // file to end with a ; which doesnt make sense
+                if !self.is_eof() {
+                    // skip ';'
+                    self.consume(Type::Semicolon);
+                    continue;
+                }
             }
             let stmt = self.sql_stmt_prefix();
             if stmt.is_some() {

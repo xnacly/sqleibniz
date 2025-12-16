@@ -184,18 +184,19 @@ fn main() {
         let mut ignored_errors = 0;
         let mut lexer = Lexer::new(&content, file.name.as_str());
         let toks = lexer.run();
+        #[cfg(feature = "trace")]
+        dbg!(&toks);
         errors.push(lexer.errors);
 
         if !toks.is_empty() {
             #[cfg(feature = "trace")]
             println!("{:=^72}", " CALLSTACK ");
             let mut parser = parser::Parser::new(toks.clone(), file.name.as_str());
-            #[cfg(not(feature = "trace"))]
             let ast = parser.parse();
             #[cfg(feature = "trace")]
             {
                 println!("{:=^72}", " AST ");
-                for node in ast {
+                for node in &ast {
                     if let Some(node) = node {
                         node.display(0);
                     }

@@ -1,6 +1,6 @@
 #[allow(unused_macros)]
 macro_rules! test_group_pass_assert {
-    ($group_name:ident,$($ident:ident:$input:literal=$expected:expr_2021),*) => {
+    ($group_name:ident,$($ident:ident:$input:literal=$expected:expr),*) => {
     mod $group_name {
         use crate::{lexer, types::Type};
 
@@ -94,6 +94,14 @@ mod should_pass {
         filled: "X'12345'"=vec![Type::Blob(vec![49, 50, 51, 52, 53])],
         filled_small: "x'1234567'"=vec![Type::Blob(vec![49, 50, 51, 52, 53, 54, 55])]
     }
+
+    test_group_pass_assert! {
+        sqleibniz_instruction,
+        with_description: "--@sqleibniz::expect description"=vec![Type::InstructionExpect],
+        without_description: "--@sqleibniz::expect"=vec![Type::InstructionExpect],
+        with_description_with_following: "--@sqleibniz::expect\n5"=vec![Type::InstructionExpect, Type::Number(5.0)],
+        with_description_with_more_following: "--@sqleibniz::expect\n5;12;"=vec![Type::InstructionExpect, Type::Number(5.0), Type::Semicolon, Type::Number(12.0), Type::Semicolon]
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +151,11 @@ mod should_fail {
         unterminated1: "X'12819281",
         unterminated_small1: "x'102812",
         bad_hex: "X'1281928FFFY'"
+    }
+
+    test_group_fail! {
+        sqleibniz_instruction,
+        none: "--@sqleibniz",
+        unknown: "--@sqleibniz::unknown"
     }
 }

@@ -1,7 +1,7 @@
 use std::f64;
 
 use crate::error::{self, Error, ImprovedLine};
-use crate::types::{rules::Rule, Keyword, Token, Type};
+use crate::types::{Keyword, Token, Type, rules::Rule};
 
 mod tests;
 
@@ -174,50 +174,75 @@ impl<'a> Lexer<'a> {
                 }
                 // comments, see: https://www.sqlite.org/lang_comment.html
                 '-' => {
-                    if self.next_is('-') {
-                        while !self.is_eof() {
-                            self.advance();
-                            if self.is('\n') {
-                                break;
-                            } else if self.is('@') {
-                                // skip @
+                    // skip --
+                    self.advance();
+                    if !self.is('-') {
+                        self.errors.push(self.err(
+                            "'-' is not a valid symbol at this point",
+                            "If you meant a comment, those are prefixed with '--'",
+                            self.line_pos,
+                            Rule::Syntax,
+                        ));
+                        break;
+                    }
+
+                    self.advance();
+
+                    while !self.is_eof() {
+                        if self.is('\n') {
+                            break;
+                        } else if self.is('@') {
+                            self.advance(); // skip '@'
+                            let start = self.pos;
+
+                            while !self.is_eof() && !self.cur().is_whitespace() {
                                 self.advance();
-                                // sqleibniz instruction found
-                                let start = self.pos;
-                                let line_start = self.line_pos;
-                                while !self.is_eof() && !self.cur().is_whitespace() {
-                                    self.advance();
-                                }
-                                let bytes = self
-                                    .source
-                                    .get(start..self.pos)
-                                    .unwrap_or_default()
-                                    .to_vec();
-                                let instruction = String::from_utf8(bytes).unwrap_or_default();
-                                if instruction.starts_with("sqleibniz") {
-                                    let function =
-                                        instruction.split("::").last().unwrap_or_default();
-                                    match function {
-                                        "expect" => {
-                                            r.push(self.single(Type::InstructionExpect));
-                                        }
-                                        _ => {
-                                            let mut err = self.err(
-                                                "Unknown sqleibniz instruction",
-                                                &format!(
-                                                    "{} is not a valid sqleibniz instruction",
-                                                    instruction
-                                                ),
-                                                line_start,
-                                                Rule::BadSqleibnizInstruction,
-                                            );
-                                            err.end = self.line_pos;
-                                            self.errors.push(err);
-                                        }
+                            }
+
+                            let bytes = self.source.get(start..self.pos).unwrap_or_default();
+                            let instruction = String::from_utf8(bytes.to_vec()).unwrap_or_default();
+
+                            let mut err = self.err(
+                                "Unknown sqleibniz instruction",
+                                "placeholder",
+                                self.line_pos,
+                                Rule::BadSqleibnizInstruction,
+                            );
+
+                            if instruction.starts_with("sqleibniz::") {
+                                let function = instruction["sqleibniz::".len()..].trim();
+                                match function {
+                                    "expect" => {
+                                        r.push(self.single(Type::InstructionExpect));
+                                    }
+                                    _ => {
+                                        err.note = format!(
+                                            "`{}` is not a valid sqleibniz instruction",
+                                            function
+                                        );
+                                        err.start = start - 1;
+                                        err.end = self.pos;
+                                        self.errors.push(err);
                                     }
                                 }
+                            } else {
+                                err.note = format!(
+                                    "`{}` is not a valid sqleibniz instruction",
+                                    instruction
+                                );
+                                err.start = start - 1;
+                                err.end = self.pos;
+                                self.errors.push(err);
                             }
+
+                            // skip rest of the line
+                            while !self.is_eof() && !self.is('\n') {
+                                self.advance();
+                            }
+                            break;
                         }
+
+                        self.advance();
                     }
                 }
                 // string, see: https://www.sqlite.org/lang_expr.html#literal_values_constants_
@@ -348,7 +373,9 @@ impl<'a> Lexer<'a> {
                                     if !c.is_ascii_hexdigit() {
                                         let mut err = self.err("Bad blob data", &format!("a Blob is hexadecimal data, '{}' is not valid hex (a..=f, A..=F, 0..=9)", c), line_start+2+idx, Rule::InvalidBlob);
                                         err.end = line_start + 2 + idx;
-                                        err.doc_url = Some("https://www.sqlite.org/lang_expr.html#literal_values_constants_");
+                                        err.doc_url = Some(
+                                            "https://www.sqlite.org/lang_expr.html#literal_values_constants_",
+                                        );
                                         self.errors.push(err);
                                         had_bad_hex = true;
                                         break;

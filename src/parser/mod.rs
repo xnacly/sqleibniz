@@ -848,14 +848,13 @@ impl<'a> Parser<'a> {
         self.advance();
 
         // skip modifiers
-        let ct = &self.cur()?.ttype;
-        match ct {
-            // only BEGIN
+        match self.cur()?.ttype {
+            // BEGIN;
             Type::Semicolon => return some_box!(begin),
             Type::Keyword(Keyword::DEFERRED)
             | Type::Keyword(Keyword::IMMEDIATE)
             | Type::Keyword(Keyword::EXCLUSIVE) => {
-                begin.transaction_kind = if let Type::Keyword(word) = ct {
+                begin.transaction_kind = if let Type::Keyword(word) = &self.cur()?.ttype {
                     Some(word.clone())
                 } else {
                     None

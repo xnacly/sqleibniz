@@ -221,7 +221,7 @@ SQLite supports a limited subset of ALTER TABLE. The ALTER TABLE command in SQLi
 /// https://www.sqlite.org/syntax/foreign-key-clause.html
 pub struct ForeignKeyClause {
     pub columns: Vec<String>,
-    pub references_table: String,
+    pub foreign_table: String,
     pub references_columns: Vec<String>,
     pub on_delete: Option<Keyword>,
     pub on_update: Option<Keyword>,

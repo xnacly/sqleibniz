@@ -1194,9 +1194,9 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/foreign-key-clause.html but specifically the ON and MATCH
-    /// blocks
+    /// blocks, only necessary because the end of the block moves back to the state machine, thus
     #[trace]
-    fn foreign_key_clause_on_and_match(&mut self) -> Option<()> {
+    fn foreign_key_clause_on_and_match(&mut self, fk: &mut ForeignKeyClause) -> Option<()> {
         if self.is_keyword(Keyword::ON) {
             self.advance();
             match self.cur()?.ttype {
@@ -1268,14 +1268,14 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
             }
-            self.foreign_key_clause_on_and_match()
+            self.foreign_key_clause_on_and_match(fk)
         } else if self.is_keyword(Keyword::MATCH) {
             self.advance();
             self.consume_ident(
                 "https://www.sqlite.org/syntax/foreign-key-clause.html",
                 "name",
             );
-            self.foreign_key_clause_on_and_match()
+            self.foreign_key_clause_on_and_match(fk)
         } else {
             None
         }
@@ -1284,20 +1284,30 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/foreign-key-clause.html
     #[trace]
     fn foreign_key_clause(&mut self) -> Option<ForeignKeyClause> {
-        // TODO: fill ForeignKeyClause
+        let mut fk = ForeignKeyClause {
+            columns: vec![],
+            foreign_table: String::new(),
+            references_columns: vec![],
+            on_delete: None,
+            on_update: None,
+            deferrable: false,
+            initially: None,
+        };
+
         self.consume_keyword(Keyword::REFERENCES);
-        self.consume_ident(
+        fk.foreign_table = self.consume_ident(
             "https://www.sqlite.org/syntax/foreign-key-clause.html",
             "foreign_table",
-        );
+        )?;
 
         if self.is(Type::BraceLeft) {
             self.advance();
             loop {
-                self.consume_ident(
+                fk.references_columns.push(self.consume_ident(
                     "https://www.sqlite.org/syntax/foreign-key-clause.html",
                     "column_name",
-                );
+                )?);
+
                 // if next token is an identifier, we require a comma
                 if let Type::Ident(_) = self.tokens.get(self.pos + 1)?.ttype {
                     self.consume(Type::Comma);
@@ -1305,10 +1315,11 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
+
             self.consume(Type::BraceRight);
         }
 
-        self.foreign_key_clause_on_and_match();
+        self.foreign_key_clause_on_and_match(&mut fk);
 
         if self.is_keyword(Keyword::NOT) || self.is_keyword(Keyword::DEFERRABLE) {
             if self.is_keyword(Keyword::NOT) {

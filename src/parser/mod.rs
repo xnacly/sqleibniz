@@ -588,13 +588,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_dropview.html
     #[trace]
     fn drop_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let mut drop = nodes::Drop {
-            t: self.cur()?.clone(),
-            if_exists: false,
-            // dummy value
-            ttype: Keyword::NULL,
-            argument: String::new(),
-        };
+        let t = self.cur()?.clone();
         self.advance();
 
         match self.cur()?.ttype {
@@ -619,67 +613,39 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // we checked if the keyword is valid above
-        if let Type::Keyword(keyword) = &self.cur()?.ttype {
-            drop.ttype = keyword.clone();
-        }
+        let ttype = {
+            let Type::Keyword(keyword) = &self.cur()?.ttype else {
+                // self.cur() in (in the set theory kind) {INDEX,TABLE,TRIGGER,VIEW}
+                unreachable!()
+            };
+            keyword.clone()
+        };
 
         // skip either INDEX;TABLE;TRIGGER or VIEW
         self.advance();
 
-        if self.is(Type::Keyword(Keyword::IF)) {
+        let if_exists = if self.is(Type::Keyword(Keyword::IF)) {
             self.advance();
             self.consume(Type::Keyword(Keyword::EXISTS));
-            drop.if_exists = true;
-        }
-
-        if let Type::Ident(schema_name) = self.cur()?.ttype.clone() {
-            // table/index/view/trigger of a schema_name
-            drop.argument.push_str(&schema_name);
-            if self.next_is(Type::Dot) {
-                // skip Type::Ident from above
-                self.advance();
-                // skip Type::Dot
-                self.advance();
-                if let Type::Ident(index_trigger_table_view) = self.cur()?.ttype.clone() {
-                    drop.argument.push('.');
-                    drop.argument.push_str(&index_trigger_table_view);
-                } else {
-                    let mut err = self.err(
-                        "Unexpected Token",
-                        &format!(
-                            "DROP requires Ident(<index_or_trigger_or_table_or_view>) after Dot and Ident(<schema_name>), got {:?}",
-                            self.cur()?.ttype
-                        ),
-                        self.cur()?,
-                        Rule::Syntax,
-                    );
-                    err.doc_url = Some(
-                        "https://www.sqlite.org/lang_dropview.html https://www.sqlite.org/lang_droptrigger.html https://www.sqlite.org/lang_droptable.html https://www.sqlite.org/lang_dropindex.html",
-                    );
-                    self.advance();
-                    self.errors.push(err);
-                }
-            }
-            self.advance();
+            true
         } else {
-            let mut err = self.err(
-                        "Unexpected Token",
-                        &format!(
-                            "DROP requires Ident(<index_or_trigger_or_table_or_view>) or Ident(<schema_name>).Ident(<index_or_trigger_or_table_or_view>), got {:?}",
-                            self.cur()?.ttype
-                        ),
-                        self.cur()?,
-                        Rule::Syntax,
-                    );
-            err.doc_url = Some(
-                "https://www.sqlite.org/lang_dropview.html https://www.sqlite.org/lang_droptrigger.html https://www.sqlite.org/lang_droptable.html https://www.sqlite.org/lang_dropindex.html",
-            );
-            self.errors.push(err);
-            return None;
-        }
+            false
+        };
 
-        some_box!(drop)
+        let argument = match self.schema_table_container_ok("https://www.sqlite.org/lang.html") {
+            Ok(a) => a,
+            Err(e) => {
+                self.errors.push(e);
+                return None;
+            }
+        };
+
+        some_box!(nodes::Drop {
+            t,
+            ttype,
+            if_exists,
+            argument,
+        })
     }
 
     /// https://www.sqlite.org/syntax/analyze-stmt.html

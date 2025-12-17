@@ -146,18 +146,28 @@ mod should_pass {
         ]
     }
 
-    // test_group_pass_assert! {
-    //     drop_stmt,
+    test_group_pass_assert! {
+        drop_stmt,
 
-    //     drop_index_index_name:r"DROP INDEX index_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_index_if_exists_schema_name_index_name:r"DROP INDEX IF EXISTS schema_name.index_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_table_table_name:r"DROP TABLE table_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_table_if_exists_schema_name_table_name:r"DROP TABLE IF EXISTS schema_name.table_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_trigger_trigger_name:r"DROP TRIGGER trigger_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_trigger_if_exists_schema_name_trigger_name:r"DROP TRIGGER IF EXISTS schema_name.trigger_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_view_view_name:r"DROP VIEW view_name;"=vec![Type::Keyword(Keyword::DROP)],
-    //     drop_view_if_exists_schema_name_view_name:r"DROP VIEW IF EXISTS schema_name.view_name;"=vec![Type::Keyword(Keyword::DROP)]
-    // }
+        drop_index_index_name:r"DROP INDEX index_name;"=vec![Drop::new(false, Keyword::INDEX, SchemaTableContainer::Table("index_name".into()))],
+        drop_index_if_exists_schema_name_index_name:r"DROP INDEX IF EXISTS schema_name.index_name;"=vec![
+            Drop::new(true, Keyword::INDEX, SchemaTableContainer::SchemaAndTable{ schema: "schema_name".into(), table: "index_name".into(), })
+        ],
+        drop_table_table_name:r"DROP TABLE table_name;"=vec![Drop::new(false, Keyword::TABLE, SchemaTableContainer::Table("table_name".into()))],
+        drop_table_if_exists_schema_name_table_name:r"DROP TABLE IF EXISTS schema_name.table_name;"=vec![
+            Drop::new(true, Keyword::TABLE, SchemaTableContainer::SchemaAndTable{ schema: "schema_name".into(), table: "table_name".into(), })
+        ],
+        drop_trigger_trigger_name:r"DROP TRIGGER trigger_name;"=vec![Drop::new(false, Keyword::TRIGGER, SchemaTableContainer::Table("trigger_name".into()))],
+        drop_trigger_if_exists_schema_name_trigger_name:r"DROP TRIGGER IF EXISTS schema_name.trigger_name;"=vec![
+            Drop::new(true, Keyword::TRIGGER, SchemaTableContainer::SchemaAndTable{ schema: "schema_name".into(), table: "trigger_name".into(), })
+        ],
+        drop_view_view_name:r"DROP VIEW view_name;"=vec![
+            Drop::new(false, Keyword::VIEW, SchemaTableContainer::Table("view_name".into()))
+        ],
+        drop_view_if_exists_schema_name_view_name:r"DROP VIEW IF EXISTS schema_name.view_name;"=vec![
+            Drop::new(true, Keyword::VIEW, SchemaTableContainer::SchemaAndTable{ schema: "schema_name".into(), table: "view_name".into(), })
+        ]
+    }
 
     // test_group_pass_assert! {
     //     savepoint_stmt,

@@ -163,12 +163,21 @@ node!(
     target: Option<SchemaTableContainer>
 );
 
+/// SchemaTableContainer contains either schema_name.table_name or table_name
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub enum SchemaTableContainer {
+    /// schema_name.table_name
+    SchemaAndTable { schema: String, table: String },
+    /// table_name
+    Table(String),
+}
+
 node!(
     Drop,
     "Drop stmt, see: https://www.sqlite.org/lang_dropindex.html, https://www.sqlite.org/lang_droptable.html, https://www.sqlite.org/lang_droptrigger.html and https://www.sqlite.org/lang_dropview.html",
     if_exists: bool,
     ttype: Keyword,
-    argument: String
+    argument: SchemaTableContainer
 );
 
 node!(
@@ -189,15 +198,6 @@ node!(
     schema_name: String,
     expr: Expr
 );
-
-/// SchemaTableContainer contains either schema_name.table_name or table_name
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
-pub enum SchemaTableContainer {
-    /// schema_name.table_name
-    SchemaAndTable { schema: String, table: String },
-    /// table_name
-    Table(String),
-}
 
 node!(
     Reindex,

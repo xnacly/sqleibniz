@@ -3,7 +3,7 @@ macro_rules! test_group_pass_assert {
     ($group_name:ident,$($ident:ident:$input:literal=$expected:expr),*) => {
     mod $group_name {
         #[allow(unused_imports)]
-        use crate::{lexer, parser::Parser, parser::nodes::*, types::*};
+        use crate::{lexer, parser::Parser, parser::nodes::*, types::*, types::storage::*};
 
         $(
             #[test]
@@ -169,47 +169,133 @@ mod should_pass {
         ]
     }
 
-    // test_group_pass_assert! {
-    //     savepoint_stmt,
+    test_group_pass_assert! {
+        savepoint_stmt,
 
-    //     savepoint_savepoint_name:r"SAVEPOINT savepoint_name;"=vec![Type::Keyword(Keyword::SAVEPOINT)]
-    // }
+        savepoint_savepoint_name:r"SAVEPOINT savepoint_name;"=vec![Savepoint::new("savepoint_name".into())]
+    }
 
-    // test_group_pass_assert! {
-    //     release_stmt,
+    test_group_pass_assert! {
+        release_stmt,
 
-    //     release_savepoint_savepoint_name:r"RELEASE SAVEPOINT savepoint_name;"=vec![Type::Keyword(Keyword::RELEASE)],
-    //     release_savepoint_name:r"RELEASE savepoint_name;"=vec![Type::Keyword(Keyword::RELEASE)]
-    // }
+        release_savepoint_savepoint_name:r"RELEASE SAVEPOINT savepoint_name;"=vec![Release::new("savepoint_name".into())],
+        release_savepoint_name:r"RELEASE savepoint_name;"=vec![Release::new("savepoint_name".into())]
+    }
 
-    // test_group_pass_assert! {
-    //     attach_stmt,
+    test_group_pass_assert! {
+        attach_stmt,
 
-    //     attach:r"ATTACH 'database.db' AS db;"=vec![Type::Keyword(Keyword::ATTACH)],
-    //     attach_database:r"ATTACH DATABASE 'database.db' AS db;"=vec![Type::Keyword(Keyword::ATTACH)]
-    // }
+        attach:r"ATTACH 'database.db' AS db;"=vec![
+            Attach::new(
+                "db".into(),
+                Expr::new(
+                    Some(Token::new(Type::String("database.db".into()))),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            ),
+        ],
+        attach_database:r"ATTACH DATABASE 'database.db' AS db;"=vec![
+            Attach::new(
+                "db".into(),
+                Expr::new(
+                    Some(Token::new(Type::String("database.db".into()))),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            ),
+        ]
+    }
 
-    // test_group_pass_assert! {
-    //     reindex_stmt,
+    test_group_pass_assert! {
+        reindex_stmt,
 
-    //     reindex:r"REINDEX;"=vec![Type::Keyword(Keyword::REINDEX)],
-    //     reindex_collation_name:r"REINDEX collation_name;"=vec![Type::Keyword(Keyword::REINDEX)],
-    //     reindex_schema_name_table_name:r"REINDEX schema_name.table_name;"=vec![Type::Keyword(Keyword::REINDEX)]
-    // }
+        reindex:r"REINDEX;"=vec![Reindex::new(None)],
+        reindex_collation_name:r"REINDEX collation_name;"=vec![Reindex::new(Some(SchemaTableContainer::Table("collation_name".into())))],
+        reindex_schema_name_table_name:r"REINDEX schema_name.table_name;"=vec![Reindex::new(Some(SchemaTableContainer::SchemaAndTable { schema: "schema_name".into(), table: "table_name".into() }))]
+    }
 
-    // test_group_pass_assert! {
-    //     alter_stmt,
+    test_group_pass_assert! {
+        alter_stmt,
 
-    //     alter_rename_to:r"ALTER TABLE schema.table_name RENAME TO new_table;"=vec![Type::Keyword(Keyword::ALTER)],
-    //     alter_rename_colum_to:r"ALTER TABLE schema.table_name RENAME COLUMN old_column_name TO new_column_name;"=vec![Type::Keyword(Keyword::ALTER)],
-    //     alter_rename_colum_to_without_column_keyword:r"ALTER TABLE schema.table_name RENAME old_column_name TO new_column_name;"=vec![Type::Keyword(Keyword::ALTER)],
+        alter_rename_to: r"ALTER TABLE schema.table_name RENAME TO new_table;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                Some("new_table".into()),
+                None,
+                None,
+                None,
+                None,
+            ),
+        ],
 
-    //     alter_add:r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT;"=vec![Type::Keyword(Keyword::ALTER)],
-    //     alter_add_without_column_keyword:r"ALTER TABLE schema.table_name ADD column_name TEXT;"=vec![Type::Keyword(Keyword::ALTER)],
+        alter_rename_column_to: r"ALTER TABLE schema.table_name RENAME COLUMN old_column_name TO new_column_name;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                Some("old_column_name".into()),
+                Some("new_column_name".into()),
+                None,
+                None,
+            ),
+        ],
+        alter_rename_column_to_without_column_keyword: r"ALTER TABLE schema.table_name RENAME old_column_name TO new_column_name;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                Some("old_column_name".into()),
+                Some("new_column_name".into()),
+                None,
+                None,
+            ),
+        ],
 
-    //     alter_drop_column:r"ALTER TABLE schema.table_name DROP COLUMN column_name;"=vec![Type::Keyword(Keyword::ALTER)],
-    //     alter_drop_column_without_column_keyword:r"ALTER TABLE schema.table_name DROP column_name;"=vec![Type::Keyword(Keyword::ALTER)]
-    // }
+        alter_add: r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                None,
+                None,
+                Some(ColumnDef::new("column_name".into(), Some(SqliteStorageClass::Text), vec![])),
+                None,
+            ),
+        ],
+        alter_add_without_column_keyword: r"ALTER TABLE schema.table_name ADD column_name TEXT;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                None,
+                None,
+                Some(ColumnDef::new("column_name".into(), Some(SqliteStorageClass::Text), vec![])),
+                None,
+            ),
+        ],
+
+        alter_drop_column: r"ALTER TABLE schema.table_name DROP COLUMN column_name;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                None,
+                None,
+                None,
+                Some("column_name".into()),
+            ),
+        ],
+        alter_drop_column_without_column_keyword: r"ALTER TABLE schema.table_name DROP column_name;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                None,
+                None,
+                None,
+                Some("column_name".into()),
+            ),
+        ]
+    }
 
     // test_group_pass_assert! {
     //     column_constraint,

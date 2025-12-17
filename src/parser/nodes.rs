@@ -217,12 +217,53 @@ SQLite supports a limited subset of ALTER TABLE. The ALTER TABLE command in SQLi
     drop_column: Option<String>
 );
 
+#[derive(Debug, serde::Serialize)]
+/// https://www.sqlite.org/syntax/foreign-key-clause.html
+pub struct ForeignKeyClause {
+    pub columns: Vec<String>,
+    pub references_table: String,
+    pub references_columns: Vec<String>,
+    pub on_delete: Option<Keyword>,
+    pub on_update: Option<Keyword>,
+    pub deferrable: bool,
+    pub initially: Option<Keyword>, // DEFERRED | IMMEDIATE
+}
+
+#[derive(Debug)]
+/// https://www.sqlite.org/syntax/column-constraint.html
+pub enum ColumnConstraint {
+    PrimaryKey {
+        // either ASC or DESC
+        asc_desc: Option<Keyword>,
+        on_conflict: Option<Keyword>,
+        autoincrement: bool,
+    },
+    NotNull {
+        on_conflict: Option<Keyword>,
+    },
+    Unique {
+        on_conflict: Option<Keyword>,
+    },
+    Check(Expr),
+    Default {
+        expr: Option<Expr>,
+        literal: Option<Literal>,
+    },
+    Collate(String),
+    Generated {
+        expr: Expr,
+        /// either STORED or VIRTUAL
+        stored_virtual: Option<Keyword>,
+    },
+    As(Expr),
+    ForeignKey(ForeignKeyClause),
+}
+
 node!(
     ColumnDef,
     "Column definition, see: https://www.sqlite.org/syntax/column-def.html",
     name: String,
     // equivalent to type_name: https://www.sqlite.org/syntax/type-name.html
-    type_name: Option<SqliteStorageClass>
-    // TODO: should i include this in analyis?
-    // constraint: Option<()>
+    type_name: Option<SqliteStorageClass>,
+    constraints: Vec<ColumnConstraint>
 );

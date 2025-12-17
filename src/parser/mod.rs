@@ -4,6 +4,7 @@ use proc::trace;
 
 use crate::{
     error::{Error, ImprovedLine},
+    parser::nodes::{ColumnConstraint, ForeignKeyClause},
     types::{Keyword, Token, Type, rules::Rule, storage::SqliteStorageClass},
 };
 
@@ -528,7 +529,6 @@ impl<'a> Parser<'a> {
         let mut a = nodes::Attach {
             t,
             schema_name: String::new(),
-
             expr: self.expr()?,
         };
 
@@ -1146,7 +1146,7 @@ impl<'a> Parser<'a> {
 
     /// https://www.sqlite.org/syntax/conflict-clause.html
     #[trace]
-    fn conflict_clause(&mut self) -> Option<()> {
+    fn conflict_clause(&mut self) -> Option<Keyword> {
         if self.is_keyword(Keyword::ON) {
             self.advance();
             self.consume_keyword(Keyword::CONFLICT);
@@ -1156,7 +1156,11 @@ impl<'a> Parser<'a> {
                     | Keyword::ABORT
                     | Keyword::FAIL
                     | Keyword::IGNORE
-                    | Keyword::REPLACE => (),
+                    | Keyword::REPLACE => {
+                        let k = keyword.clone();
+                        self.advance();
+                        return Some(k);
+                    }
                     _ => {
                         let mut err = self.err(
                             "Unexpected Keyword",
@@ -1279,7 +1283,8 @@ impl<'a> Parser<'a> {
 
     /// https://www.sqlite.org/syntax/foreign-key-clause.html
     #[trace]
-    fn foreign_key_clause(&mut self) -> Option<()> {
+    fn foreign_key_clause(&mut self) -> Option<ForeignKeyClause> {
+        // TODO: fill ForeignKeyClause
         self.consume_keyword(Keyword::REFERENCES);
         self.consume_ident(
             "https://www.sqlite.org/syntax/foreign-key-clause.html",
@@ -1340,6 +1345,7 @@ impl<'a> Parser<'a> {
             t: self.cur()?.clone(),
             name: String::new(),
             type_name: None,
+            constraints: vec![],
         };
 
         def.name = self.consume_ident("https://www.sqlite.org/syntax/column-def.html", "name")?;
@@ -1410,64 +1416,114 @@ impl<'a> Parser<'a> {
         {
             if self.is_keyword(Keyword::CONSTRAINT) {
                 self.advance();
-                // info
                 self.consume_ident(
                     "https://www.sqlite.org/syntax/column-constraint.html",
                     "name",
                 );
             }
 
-            if self.is_keyword(Keyword::PRIMARY) {
+            let constraint = if self.is_keyword(Keyword::PRIMARY) {
                 self.advance();
                 self.consume_keyword(Keyword::KEY);
-                if self.is_keyword(Keyword::ASC) || self.is_keyword(Keyword::DESC) {
+                let asc_desc =
+                    if let Type::Keyword(k @ (Keyword::ASC | Keyword::DESC)) = &self.cur()?.ttype {
+                        let k = k.clone();
+                        self.advance();
+                        Some(k)
+                    } else {
+                        None
+                    };
+
+                let on_conflict = self.conflict_clause();
+                let autoincrement = if self.is_keyword(Keyword::AUTOINCREMENT) {
                     self.advance();
-                }
-                self.conflict_clause();
-                if self.is_keyword(Keyword::AUTOINCREMENT) {
-                    self.advance();
-                }
+                    true
+                } else {
+                    false
+                };
+
+                Some(ColumnConstraint::PrimaryKey {
+                    asc_desc,
+                    on_conflict,
+                    autoincrement,
+                })
             } else if self.is_keyword(Keyword::NOT) {
                 self.advance();
                 self.consume_keyword(Keyword::NULL);
-                self.conflict_clause();
+                Some(ColumnConstraint::NotNull {
+                    on_conflict: self.conflict_clause(),
+                })
             } else if self.is_keyword(Keyword::UNIQUE) {
                 self.advance();
-                self.conflict_clause();
+                Some(ColumnConstraint::NotNull {
+                    on_conflict: self.conflict_clause(),
+                })
             } else if self.is_keyword(Keyword::CHECK) {
                 self.advance();
                 self.consume(Type::BraceLeft);
-                self.expr();
+                let e = self.expr()?;
                 self.consume(Type::BraceRight);
+                Some(ColumnConstraint::Check(e))
             } else if self.is_keyword(Keyword::DEFAULT) {
                 self.advance();
                 if self.is(Type::BraceLeft) {
                     self.advance();
-                    self.expr();
+                    let expr = self.expr();
                     self.consume(Type::BraceRight);
+                    Some(ColumnConstraint::Default {
+                        literal: None,
+                        expr,
+                    })
                 } else {
-                    self.literal_value();
+                    // this aint so pretty, but sometimes i do need literals as Option<Box<dyn
+                    // Box>> and sometimes as Option<Literal>, it is what it is
+                    let lit = self.literal_value();
+                    Some(ColumnConstraint::Default {
+                        literal: lit.map(|n| nodes::Literal {
+                            t: n.token().clone(),
+                        }),
+                        expr: None,
+                    })
                 }
             } else if self.is_keyword(Keyword::COLLATE) {
                 self.advance();
-                self.consume_ident(
+                Some(ColumnConstraint::Collate(self.consume_ident(
                     "https://www.sqlite.org/syntax/column-constraint.html",
                     "collation_name",
-                );
+                )?))
             } else if self.is_keyword(Keyword::REFERENCES) {
-                self.foreign_key_clause();
+                Some(ColumnConstraint::ForeignKey(self.foreign_key_clause()?))
             } else if self.is_keyword(Keyword::GENERATED) || self.is_keyword(Keyword::AS) {
                 if self.is_keyword(Keyword::GENERATED) {
                     self.advance();
                     self.consume_keyword(Keyword::ALWAYS);
                 }
+
                 self.consume_keyword(Keyword::AS);
                 self.consume(Type::BraceLeft);
-                self.expr();
+                let expr = self.expr().unwrap();
                 self.consume(Type::BraceRight);
-                if self.is_keyword(Keyword::STORED) || self.is_keyword(Keyword::VIRTUAL) {
-                    self.advance();
-                }
+
+                let stored_virtual =
+                    if let Type::Keyword(k @ (Keyword::STORED | Keyword::VIRTUAL)) =
+                        &self.cur()?.ttype
+                    {
+                        let k = k.clone();
+                        self.advance();
+                        Some(k)
+                    } else {
+                        None
+                    };
+                Some(ColumnConstraint::Generated {
+                    expr,
+                    stored_virtual,
+                })
+            } else {
+                None
+            };
+
+            if let Some(constraint) = constraint {
+                def.constraints.push(constraint);
             }
         }
 

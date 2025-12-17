@@ -1455,7 +1455,7 @@ impl<'a> Parser<'a> {
                 })
             } else if self.is_keyword(Keyword::UNIQUE) {
                 self.advance();
-                Some(ColumnConstraint::NotNull {
+                Some(ColumnConstraint::Unique {
                     on_conflict: self.conflict_clause(),
                 })
             } else if self.is_keyword(Keyword::CHECK) {

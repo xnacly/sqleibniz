@@ -107,24 +107,6 @@ impl<'a> Parser<'a> {
         None
     }
 
-    /// if current token in t advance, otherwise return false and push error; finally advance
-    fn matches_one(&mut self, t: Vec<Type>) -> bool {
-        if let Some(cur) = &self.cur() {
-            if !t.contains(&cur.ttype) {
-                self.errors.push(self.err(
-                    "Unexpected Token",
-                    &format!("Wanted any of {:?}, got {:?}", t, cur.ttype),
-                    cur,
-                    Rule::Syntax,
-                ));
-                return false;
-            }
-            self.advance();
-            return true;
-        }
-        false
-    }
-
     /// checks if type of current token is equal to t, otherwise pushs an error, advances either way
     fn consume(&mut self, t: Type) {
         let tt = t.clone();
@@ -181,7 +163,7 @@ impl<'a> Parser<'a> {
             let mut err = self.err(
                 "Unexpected Statement Continuation",
                 &format!(
-                    "End of statement via Semicolon expected, got {:?}",
+                    "Expected statement end via Semicolon, got {:?}",
                     self.cur()?.ttype
                 ),
                 self.cur()?,
@@ -306,7 +288,7 @@ impl<'a> Parser<'a> {
             Type::Semicolon => {
                 self.errors.push(self.err(
                     "Unexpected Token",
-                    "Semicolon makes no sense at this point",
+                    "Semicolon makes no sense at this point, Semicolons are used to terminate statements",
                     self.cur()?,
                     Rule::Syntax,
                 ));
@@ -326,7 +308,7 @@ impl<'a> Parser<'a> {
             | Type::Keyword(Keyword::CURRENT_TIMESTAMP) => {
                 let mut err = self.err(
                     "Unexpected Literal",
-                    &format!("Literal {:?} disallowed at this point.", self.cur()?.ttype),
+                    &format!("Literal {:?} can not start a statement", self.cur()?.ttype),
                     self.cur()?,
                     Rule::Syntax,
                 );
@@ -339,16 +321,18 @@ impl<'a> Parser<'a> {
                 if let Type::Ident(name) = &self.cur()?.ttype {
                     let suggestions = Keyword::suggestions(name);
                     if !suggestions.is_empty() {
-                        self.errors.push(self.err(
+                        let mut err = self.err(
                             "Unknown Keyword",
                             &format!(
-                                "'{}' is not a known keyword, did you mean: \n\t- {}",
+                                "'{}' is not a known keyword, did you mean one of: {}",
                                 name,
-                                suggestions.join("\n\t- ").as_str()
+                                suggestions.join(", ").as_str()
                             ),
                             self.cur()?,
                             Rule::UnknownKeyword,
-                        ));
+                        );
+                        err.doc_url = Some("https://sqlite.org/lang_keywords.html");
+                        self.errors.push(err);
                     } else {
                         self.errors.push(self.err(
                             "Unknown Keyword",
@@ -1177,9 +1161,9 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 let mut err = self.err(
-                    "Unexpected Token",
+                    "Unexpected Keyword",
                     &format!(
-                        "Wanted a Keyword at this point, got {:?}.",
+                        "Wanted either ROLLBACK, ABORT, FAIL, IGNORE or REPLACE after ON CONFLICT, got {:?}.",
                         self.cur()?.ttype
                     ),
                     self.cur()?,

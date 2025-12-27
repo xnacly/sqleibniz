@@ -13,6 +13,9 @@ pub enum Rule {
     /// Source file contains invalid sqleibniz instruction
     BadSqleibnizInstruction,
 
+    /// Source file uses sql features sqlite does not support
+    SqliteUnsupported,
+
     /// Source file contains an unterminated string
     UnterminatedString,
     /// The source file contains an unknown character
@@ -44,12 +47,13 @@ impl mlua::FromLua for Rule {
             "Semicolon" => Self::Semicolon,
             "BadSqleibnizInstruction" => Self::BadSqleibnizInstruction,
             "UnknownKeyword" => Self::UnknownKeyword,
+            "SqliteUnsupported" => Self::SqliteUnsupported,
             _ => {
                 return Err(mlua::Error::FromLuaConversionError {
                     from: "string",
                     to: "sqleibniz::rules::Rule".into(),
                     message: Some("Unknown rule name".into()),
-                })
+                });
             }
         })
     }
@@ -69,6 +73,7 @@ impl Rule {
             Self::Semicolon => "Semicolon",
             Self::BadSqleibnizInstruction => "BadSqleibnizInstruction",
             Self::UnknownKeyword => "UnknownKeyword",
+            Self::SqliteUnsupported => "SqliteUnsupported",
         }
     }
 
@@ -89,6 +94,7 @@ impl Rule {
                 "The source file contains an invalid sqleibniz instruction"
             }
             Self::UnknownKeyword => "Source file contains an unknown keyword",
+            Self::SqliteUnsupported => "Source file uses sql features sqlite does not support",
         }
     }
 }

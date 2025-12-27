@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::lev;
 
-#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, serde::Serialize)]
+#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, serde::Serialize, Copy)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Keyword {
@@ -154,6 +154,11 @@ pub enum Keyword {
     WINDOW,
     WITH,
     WITHOUT,
+
+    // only necessary, since sqlite does not treat these match types as keywords, so we have to
+    // define them by ourselfs
+    PARTIAL,
+    SIMPLE,
 }
 
 impl Keyword {
@@ -469,6 +474,8 @@ impl Keyword {
             "WINDOW" => Keyword::WINDOW,
             "WITH" => Keyword::WITH,
             "WITHOUT" => Keyword::WITHOUT,
+            "PARTIAL" => Keyword::PARTIAL,
+            "SIMPLE" => Keyword::SIMPLE,
             _ => return None,
         })
     }

@@ -209,8 +209,7 @@ impl<'a> Lexer<'a> {
                                 Rule::BadSqleibnizInstruction,
                             );
 
-                            if instruction.starts_with("sqleibniz::") {
-                                let function = instruction["sqleibniz::".len()..].trim();
+                            if let Some(function) = instruction.strip_prefix("sqleibniz::") {
                                 match function {
                                     "expect" => {
                                         r.push(self.single(Type::InstructionExpect));

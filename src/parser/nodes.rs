@@ -218,15 +218,34 @@ SQLite supports a limited subset of ALTER TABLE. The ALTER TABLE command in SQLi
 );
 
 #[derive(Debug, serde::Serialize)]
+pub enum ForeignKeyAction {
+    Cascade,
+    Restrict,
+    NoAction,
+    SetNull,
+    SetDefault,
+}
+
+#[derive(Debug, serde::Serialize)]
+/// SQLite parses MATCH clauses (i.e. does not report a syntax error if you specify one), but does
+/// not enforce them. All foreign key constraints in SQLite are handled as if MATCH SIMPLE were
+/// specified, see https://sqlite.org/foreignkeys.html#fk_unsupported
+pub enum ForeignKeyMatch {
+    Simple,
+    Full,
+    Partial,
+}
+
+#[derive(Debug, serde::Serialize)]
 /// https://www.sqlite.org/syntax/foreign-key-clause.html
 pub struct ForeignKeyClause {
-    pub columns: Vec<String>,
     pub foreign_table: String,
     pub references_columns: Vec<String>,
-    pub on_delete: Option<Keyword>,
-    pub on_update: Option<Keyword>,
+    pub on_delete: Option<ForeignKeyAction>,
+    pub on_update: Option<ForeignKeyAction>,
+    pub match_type: Option<ForeignKeyMatch>,
     pub deferrable: bool,
-    pub initially: Option<Keyword>, // DEFERRED | IMMEDIATE
+    pub initially_deferred: bool,
 }
 
 #[derive(Debug)]

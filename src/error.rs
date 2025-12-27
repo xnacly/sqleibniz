@@ -80,7 +80,7 @@ pub fn print_str_colored(b: &mut builder::Builder, s: &str, c: Color) {
 }
 
 impl Error {
-    pub fn print(&mut self, b: &mut builder::Builder, content: &Vec<u8>, tokens: &[Token]) {
+    pub fn print(&mut self, b: &mut builder::Builder, content: &[u8], tokens: &[Token]) {
         print_str_colored(b, "error", Color::Red);
         b.write_char('[');
         print_str_colored(b, self.rule.name(), Color::Red);

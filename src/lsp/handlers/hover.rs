@@ -19,7 +19,7 @@ pub fn handle(
                 && tok.start <= character as usize
                 && tok.end >= character as usize
         })
-        .last()
+        .next_back()
     {
         Some(tok) => format!("sqleibniz: {:?}", tok.ttype),
         None => "sqleibniz: Unknown".into(),

@@ -10,10 +10,10 @@ pub fn distance(a: &[u8], b: &[u8]) -> usize {
     } else if a.is_empty() {
         b.len()
     } else if a[0] == b[0] {
-        return distance(
+        distance(
             a.get(1..).unwrap_or_default(),
             b.get(1..).unwrap_or_default(),
-        );
+        )
     } else {
         let first = distance(a.get(1..).unwrap_or_default(), b);
         let second = distance(a, b.get(1..).unwrap_or_default());

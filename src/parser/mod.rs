@@ -4,7 +4,7 @@ use proc::trace;
 
 use crate::{
     error::{Error, ImprovedLine},
-    parser::nodes::{ColumnConstraint, ForeignKeyClause},
+    parser::nodes::{ColumnConstraint, ForeignKeyAction, ForeignKeyClause, ForeignKeyMatch},
     types::{Keyword, Token, Type, rules::Rule, storage::SqliteStorageClass},
 };
 
@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
 
     fn is_keyword(&self, keyword: Keyword) -> bool {
         self.cur()
-            .map_or(false, |tok| tok.ttype == Type::Keyword(keyword))
+            .is_some_and(|tok| tok.ttype == Type::Keyword(keyword))
     }
 
     fn skip_until_semicolon_or_eof(&mut self) {
@@ -154,7 +154,7 @@ impl<'a> Parser<'a> {
     fn next_is(&self, t: Type) -> bool {
         self.tokens
             .get(self.pos + 1)
-            .map_or(false, |tok| tok.ttype == t)
+            .is_some_and(|tok| tok.ttype == t)
     }
 
     /// checks if current token is not semicolon, if it isnt pushes an error
@@ -207,8 +207,7 @@ impl<'a> Parser<'a> {
 
     #[trace]
     pub fn parse(&mut self) -> Vec<Option<Box<dyn nodes::Node>>> {
-        let r = self.sql_stmt_list();
-        r
+        self.sql_stmt_list()
     }
 
     /// see: https://www.sqlite.org/syntax/sql-stmt-list.html
@@ -269,7 +268,7 @@ impl<'a> Parser<'a> {
     /// see: https://www.sqlite.org/syntax/sql-stmt.html
     #[trace]
     fn sql_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let r = match self.cur()?.ttype {
+        match self.cur()?.ttype {
             // TODO: add new statement starts here
             Type::Keyword(Keyword::ALTER) => self.alter_stmt(),
             Type::Keyword(Keyword::ATTACH) => self.attach_stmt(),
@@ -371,9 +370,7 @@ impl<'a> Parser<'a> {
                 self.skip_until_semicolon_or_eof();
                 None
             }
-        };
-
-        r
+        }
     }
 
     // TODO: add new statement function here *_stmt()
@@ -386,6 +383,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_createindex.html
     #[trace]
     fn create_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        println!("Parser::create_stmt");
         None
     }
 
@@ -1178,13 +1176,16 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/foreign-key-clause.html but specifically the ON and MATCH
-    /// blocks, only necessary because the end of the block moves back to the state machine, thus
+    /// paths, necessary because the end of the block moves back to the state machine states ON and
+    /// MATCH
     #[trace]
     fn foreign_key_clause_on_and_match(&mut self, fk: &mut ForeignKeyClause) -> Option<()> {
+        let mut is_delete = false;
         if self.is_keyword(Keyword::ON) {
             self.advance();
-            match self.cur()?.ttype {
-                Type::Keyword(Keyword::DELETE) | Type::Keyword(Keyword::UPDATE) => (),
+            match &self.cur()?.ttype {
+                Type::Keyword(Keyword::DELETE) => is_delete = true,
+                Type::Keyword(Keyword::UPDATE) => (),
                 _ => {
                     let mut err = self.err(
                         "Unexpected Token",
@@ -1197,46 +1198,30 @@ impl<'a> Parser<'a> {
                 }
             };
             self.advance();
-            match &self.cur()?.ttype {
-                Type::Keyword(keyword) => match keyword {
-                    Keyword::SET => {
-                        self.advance();
-                        if !(self.is_keyword(Keyword::NULL) || self.is_keyword(Keyword::DEFAULT)) {
-                            let mut err = self.err(
-                                "Unexpected Token",
-                                &format!(
-                                    "Wanted NULL or DEFAULT after SET, got {:?}.",
-                                    self.cur()?.ttype
-                                ),
-                                self.cur()?,
-                                Rule::Syntax,
-                            );
-                            err.doc_url =
-                                Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
-                            self.errors.push(err);
-                        }
-                        self.advance();
-                    }
-                    Keyword::CASCADE | Keyword::RESTRICT => self.advance(),
-                    Keyword::NO => {
-                        self.advance();
-                        self.consume_keyword(Keyword::ACTION);
-                    }
-                    _ => {
-                        let mut err = self.err(
-                            "Unexpected Token",
-                            &format!(
-                                "Wanted SET, CASCADE, RESTRICT or NO after ON DELETE/UPDATE, got {:?}.",
-                                self.cur()?.ttype
-                            ),
-                            self.cur()?,
-                            Rule::Syntax,
-                        );
-                        err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
-                        self.errors.push(err);
-                        self.advance();
-                    }
-                },
+
+            let action = match self.cur()?.ttype {
+                Type::Keyword(Keyword::CASCADE) => {
+                    self.advance();
+                    Some(ForeignKeyAction::Cascade)
+                }
+                Type::Keyword(Keyword::RESTRICT) => {
+                    self.advance();
+                    Some(ForeignKeyAction::Restrict)
+                }
+                Type::Keyword(Keyword::NO) => {
+                    self.advance();
+                    self.consume_keyword(Keyword::ACTION);
+                    Some(ForeignKeyAction::NoAction)
+                }
+                Type::Keyword(Keyword::SET) => {
+                    self.advance();
+                    Some(if self.is_keyword(Keyword::NULL) {
+                        ForeignKeyAction::SetNull
+                    } else {
+                        self.consume_keyword(Keyword::DEFAULT);
+                        ForeignKeyAction::SetDefault
+                    })
+                }
                 _ => {
                     let mut err = self.err(
                         "Unexpected Token",
@@ -1250,32 +1235,43 @@ impl<'a> Parser<'a> {
                     err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
                     self.errors.push(err);
                     self.advance();
+                    None
                 }
+            };
+
+            if is_delete {
+                fk.on_delete = action;
+            } else {
+                fk.on_update = action;
             }
+
             self.foreign_key_clause_on_and_match(fk)
         } else if self.is_keyword(Keyword::MATCH) {
             self.advance();
-            self.consume_ident(
-                "https://www.sqlite.org/syntax/foreign-key-clause.html",
-                "name",
-            );
+            fk.match_type = match self.cur()?.ttype {
+                Type::Keyword(Keyword::FULL) => Some(ForeignKeyMatch::Full),
+                Type::Keyword(Keyword::PARTIAL) => Some(ForeignKeyMatch::Partial),
+                Type::Keyword(Keyword::SIMPLE) => Some(ForeignKeyMatch::Simple),
+                _ => todo!("error handling MATCH <kind>"),
+            };
+            self.advance();
             self.foreign_key_clause_on_and_match(fk)
         } else {
             None
         }
     }
 
-    /// https://www.sqlite.org/syntax/foreign-key-clause.html
+    /// https://www.sqlite.org/syntax/foreign-key-clause.html and https://sqlite.org/foreignkeys.html
     #[trace]
     fn foreign_key_clause(&mut self) -> Option<ForeignKeyClause> {
         let mut fk = ForeignKeyClause {
-            columns: vec![],
             foreign_table: String::new(),
             references_columns: vec![],
             on_delete: None,
             on_update: None,
+            match_type: None,
             deferrable: false,
-            initially: None,
+            initially_deferred: false,
         };
 
         self.consume_keyword(Keyword::REFERENCES);
@@ -1292,9 +1288,9 @@ impl<'a> Parser<'a> {
                     "column_name",
                 )?);
 
-                // if next token is an identifier, we require a comma
-                if let Type::Ident(_) = self.tokens.get(self.pos + 1)?.ttype {
-                    self.consume(Type::Comma);
+                // if we have a comma, the next token is an identifier
+                if self.is(Type::Comma) {
+                    self.advance();
                 } else {
                     break;
                 }
@@ -1306,14 +1302,19 @@ impl<'a> Parser<'a> {
         self.foreign_key_clause_on_and_match(&mut fk);
 
         if self.is_keyword(Keyword::NOT) || self.is_keyword(Keyword::DEFERRABLE) {
+            fk.deferrable = true;
             if self.is_keyword(Keyword::NOT) {
+                fk.deferrable = false;
                 self.advance();
             }
             self.consume_keyword(Keyword::DEFERRABLE);
             if self.is_keyword(Keyword::INITIALLY) {
                 self.advance();
-                if !(self.is_keyword(Keyword::DEFERRED) || self.is_keyword(Keyword::IMMEDIATE)) {
-                    let mut err = self.err(
+                match &self.cur()?.ttype {
+                    Type::Keyword(Keyword::DEFERRED) => fk.initially_deferred = true,
+                    Type::Keyword(Keyword::IMMEDIATE) => (),
+                    _ => {
+                        let mut err = self.err(
                         "Unexpected Keyword",
                         &format!(
                             "Wanted DEFERRED or IMMEDIATE after DEFERRABLE INITIALLY, got {:?}.",
@@ -1322,15 +1323,20 @@ impl<'a> Parser<'a> {
                         self.cur()?,
                         Rule::Syntax,
                     );
-                    err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
-                    self.errors.push(err);
-                }
+                        err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
+                        self.errors.push(err);
+                    }
+                };
+
                 self.advance();
             }
-            None
-        } else {
-            None
+
+            if !fk.deferrable {
+                fk.initially_deferred = false;
+            }
         }
+
+        None
     }
 
     /// https://www.sqlite.org/syntax/column-def.html
@@ -1422,7 +1428,7 @@ impl<'a> Parser<'a> {
                 self.consume_keyword(Keyword::KEY);
                 let asc_desc =
                     if let Type::Keyword(k @ (Keyword::ASC | Keyword::DESC)) = &self.cur()?.ttype {
-                        let k = k.clone();
+                        let k = *k;
                         self.advance();
                         Some(k)
                     } else {
@@ -1503,7 +1509,7 @@ impl<'a> Parser<'a> {
                     if let Type::Keyword(k @ (Keyword::STORED | Keyword::VIRTUAL)) =
                         &self.cur()?.ttype
                     {
-                        let k = k.clone();
+                        let k = *k;
                         self.advance();
                         Some(k)
                     } else {

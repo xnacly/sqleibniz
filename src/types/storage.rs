@@ -56,4 +56,20 @@ impl SqliteStorageClass {
             Self::Integer
         }
     }
+
+    pub fn from_str_strict(s: &str) -> Option<Self> {
+        Some(match s {
+            "TEXT" => Self::Text,
+            "BLOB" => Self::Blob,
+            "REAL" => Self::Real,
+            "INT" | "INTEGER" => Self::Integer,
+            _ => {
+                if s.contains("VARCHAR") {
+                    Self::Text
+                } else {
+                    return None;
+                }
+            }
+        })
+    }
 }

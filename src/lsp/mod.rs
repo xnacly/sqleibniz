@@ -4,10 +4,10 @@ mod handlers;
 use error::LspError;
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId};
 use lsp_types::{
-    notification::{DidChangeTextDocument, DidOpenTextDocument},
-    request::{DocumentDiagnosticRequest, HoverRequest},
     DiagnosticOptions, InitializeParams, SaveOptions, ServerCapabilities, TextDocumentSyncKind,
     TextDocumentSyncOptions,
+    notification::{DidChangeTextDocument, DidOpenTextDocument},
+    request::{DocumentDiagnosticRequest, HoverRequest},
 };
 
 use crate::{lexer::Lexer, parser::Parser, types::Token};

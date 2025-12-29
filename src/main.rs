@@ -10,6 +10,8 @@ use lexer::Lexer;
 use types::config::Config;
 use types::rules::Rule;
 
+use crate::parser::nodes::Node;
+
 /// error does formatting and highlighting for errors
 mod error;
 /// highlight implements logic for highlighting tokens found in a string

@@ -4,32 +4,29 @@
 ///
 /// see: https://en.wikipedia.org/wiki/Levenshtein_distance
 pub fn distance(a: &[u8], b: &[u8]) -> usize {
-    // TODO: this implementation is naive at best, use the matrix approach
-    if b.is_empty() {
-        a.len()
-    } else if a.is_empty() {
-        b.len()
-    } else if a[0] == b[0] {
-        distance(
-            a.get(1..).unwrap_or_default(),
-            b.get(1..).unwrap_or_default(),
-        )
-    } else {
-        let first = distance(a.get(1..).unwrap_or_default(), b);
-        let second = distance(a, b.get(1..).unwrap_or_default());
-        let third = distance(
-            a.get(1..).unwrap_or_default(),
-            b.get(1..).unwrap_or_default(),
-        );
-        let mut min = first;
-        if min > second {
-            min = second
-        }
-        if min > third {
-            min = third
-        }
-        1 + min
+    if a.is_empty() {
+        return b.len();
     }
+    if b.is_empty() {
+        return a.len();
+    }
+
+    let mut prev_row: Vec<usize> = (0..=b.len()).collect();
+    let mut cur_row = vec![0; b.len() + 1];
+
+    for (i, &ac) in a.iter().enumerate() {
+        cur_row[0] = i + 1;
+        for (j, &bc) in b.iter().enumerate() {
+            let cost = if ac == bc { 0 } else { 1 };
+            cur_row[j + 1] = std::cmp::min(
+                std::cmp::min(cur_row[j] + 1, prev_row[j + 1] + 1),
+                prev_row[j] + cost,
+            );
+        }
+        std::mem::swap(&mut prev_row, &mut cur_row);
+    }
+
+    prev_row[b.len()]
 }
 
 #[cfg(test)]

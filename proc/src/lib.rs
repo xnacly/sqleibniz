@@ -15,7 +15,7 @@ pub fn trace(_attr: TokenStream, item: TokenStream) -> TokenStream {
             #[cfg(feature = "trace")]
             CALL_DEPTH.with(|depth| {
                 let indent = depth.get();
-                println!("{}↳ {} | {:?}", " ".repeat(indent), stringify!(#fn_name), self.cur().map(|t| t.ttype.clone()));
+                println!("{}↳ {} | {:?}", " ".repeat(indent), stringify!(#fn_name), self.cur().ttype);
                 depth.set(indent + 1);
             });
 

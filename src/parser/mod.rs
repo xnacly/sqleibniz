@@ -51,11 +51,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn cur(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
+    fn cur(&self) -> &Token {
+        if let Some(tok) = self.tokens.get(self.pos) {
+            tok
+        } else {
+            &Token {
+                ttype: Type::Eof,
+                start: 0,
+                end: 0,
+                line: 0,
+            }
+        }
     }
 
-    fn err(&self, msg: &str, note: &str, start: &Token, rule: Rule) -> Error {
+    fn err(&self, msg: impl Into<String>, note: &str, start: &Token, rule: Rule) -> Error {
         Error {
             improved_line: None,
             file: self.name.to_string(),
@@ -64,9 +73,14 @@ impl<'a> Parser<'a> {
             note: note.into(),
             msg: msg.into(),
             start: start.start,
-            end: self.cur().map_or(start.start, |tok| tok.end),
+            end: start.end,
             doc_url: None,
         }
+    }
+
+    fn push_err(&mut self, msg: impl Into<String>, note: &str, start: &Token, rule: Rule) {
+        let err = self.err(msg, note, start, rule);
+        self.errors.push(err);
     }
 
     fn is_eof(&self) -> bool {
@@ -79,13 +93,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn is(&self, t: Type) -> bool {
-        self.cur().is_some_and(|tok| tok.ttype == t)
+    fn is(&mut self, t: Type) -> bool {
+        self.cur().ttype == t
     }
 
-    fn is_keyword(&self, keyword: Keyword) -> bool {
-        self.cur()
-            .is_some_and(|tok| tok.ttype == Type::Keyword(keyword))
+    fn is_keyword(&mut self, keyword: Keyword) -> bool {
+        self.cur().ttype == Type::Keyword(keyword)
     }
 
     fn skip_until_semicolon_or_eof(&mut self) {
@@ -94,42 +107,18 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// if current token in t advance, otherwise return false; finally advance
-    fn matches_any(&mut self, t: Vec<Type>) -> Option<Token> {
-        if let Some(cur) = &self.cur() {
-            if t.contains(&cur.ttype) {
-                let t = (*cur).clone();
-                self.advance();
-                return Some(t);
-            }
-            return None;
-        }
-        None
-    }
-
     /// checks if type of current token is equal to t, otherwise pushs an error, advances either way
     fn consume(&mut self, t: Type) {
         let tt = t.clone();
         if !self.is(tt) {
-            let cur = match self.cur() {
-                None => {
-                    let last = self.tokens.get(self.pos - 1).unwrap();
-                    &Token {
-                        ttype: Type::Eof,
-                        start: last.end,
-                        end: last.end,
-                        line: last.line,
-                    }
-                }
-                Some(c) => c,
-            };
+            let cur = self.cur().clone();
             let mut err = self.err(
                 match cur.ttype {
                     Type::Eof => "Unexpected End of input",
                     _ => "Unexpected Token",
                 },
                 &format!("Wanted {:?}, got {:?}", t, cur.ttype),
-                cur,
+                &cur,
                 Rule::Syntax,
             );
             if t == Type::Semicolon {
@@ -138,7 +127,7 @@ impl<'a> Parser<'a> {
                 err.rule = Rule::Semicolon;
                 err.improved_line = Some(ImprovedLine {
                     snippet: ";",
-                    start: cur.end,
+                    start: self.cur().end,
                 });
             }
             err.doc_url = Some("https://www.sqlite.org/syntax/sql-stmt.html");
@@ -157,16 +146,14 @@ impl<'a> Parser<'a> {
             .is_some_and(|tok| tok.ttype == t)
     }
 
-    /// checks if current token is not semicolon, if it isnt pushes an error
+    /// checks if current token is semicolon, if not pushes Rule::Syntax
     fn expect_end(&mut self, doc: &'static str) -> Option<()> {
         if !self.is(Type::Semicolon) {
+            let cur = self.cur().clone();
             let mut err = self.err(
                 "Unexpected Statement Continuation",
-                &format!(
-                    "Expected statement end via Semicolon, got {:?}",
-                    self.cur()?.ttype
-                ),
-                self.cur()?,
+                &format!("Expected statement end via Semicolon, got {:?}", cur.ttype),
+                &cur,
                 Rule::Syntax,
             );
             if !doc.is_empty() {
@@ -183,24 +170,24 @@ impl<'a> Parser<'a> {
         doc: &'static str,
         expected_ident_name: &'static str,
     ) -> Option<String> {
-        if let Type::Ident(ident) = &self.cur()?.ttype {
-            let i = ident.clone();
+        if let Type::Ident(ident) = &self.cur().ttype {
+            let i = ident.to_string();
             self.advance();
             Some(i)
         } else {
+            let cur = self.cur().clone();
             let mut err = self.err(
                 "Unexpected Token",
                 &format!(
                     "Expected Ident(<{}>), got {:?}",
-                    expected_ident_name,
-                    self.cur()?.ttype
+                    expected_ident_name, cur.ttype
                 ),
-                self.cur()?,
+                &cur,
                 Rule::Syntax,
             );
             err.doc_url = Some(doc);
             self.errors.push(err);
-            self.skip_until_semicolon_or_eof();
+            self.advance();
             None
         }
     }
@@ -215,10 +202,10 @@ impl<'a> Parser<'a> {
     fn sql_stmt_list(&mut self) -> Vec<Option<Box<dyn nodes::Node>>> {
         let mut r = vec![];
         while !self.is_eof() {
-            if let Some(Token {
+            if let Token {
                 ttype: Type::InstructionExpect,
                 ..
-            }) = self.cur()
+            } = self.cur()
             {
                 // skip all token until the statement ends
                 self.skip_until_semicolon_or_eof();
@@ -241,9 +228,9 @@ impl<'a> Parser<'a> {
 
     #[trace]
     fn sql_stmt_prefix(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let r: Option<Box<dyn nodes::Node>> = match self.cur()?.ttype {
+        let r: Option<Box<dyn nodes::Node>> = match self.cur().ttype {
             Type::Keyword(Keyword::EXPLAIN) => {
-                let t = self.cur()?.clone();
+                let t = self.cur().clone();
                 // skip EXPLAIN
                 self.advance();
 
@@ -268,7 +255,7 @@ impl<'a> Parser<'a> {
     /// see: https://www.sqlite.org/syntax/sql-stmt.html
     #[trace]
     fn sql_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             // TODO: add new statement starts here
             Type::Keyword(Keyword::ALTER) => self.alter_stmt(),
             Type::Keyword(Keyword::ATTACH) => self.attach_stmt(),
@@ -285,12 +272,12 @@ impl<'a> Parser<'a> {
 
             // statement should not start with a semicolon 󰚌
             Type::Semicolon => {
-                self.errors.push(self.err(
+                self.push_err(
                     "Unexpected Token",
                     "Semicolon makes no sense at this point, Semicolons are used to terminate statements",
-                    self.cur()?,
+                    &self.cur().clone(),
                     Rule::Syntax,
-                ));
+                );
                 self.advance();
                 None
             }
@@ -307,8 +294,8 @@ impl<'a> Parser<'a> {
             | Type::Keyword(Keyword::CURRENT_TIMESTAMP) => {
                 let mut err = self.err(
                     "Unexpected Literal",
-                    &format!("Literal {:?} can not start a statement", self.cur()?.ttype),
-                    self.cur()?,
+                    &format!("Literal {:?} can not start a statement", self.cur().ttype),
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/syntax/sql-stmt.html");
@@ -316,57 +303,54 @@ impl<'a> Parser<'a> {
                 self.advance();
                 None
             }
-            Type::Ident(_) => {
-                if let Type::Ident(name) = &self.cur()?.ttype {
-                    let suggestions = Keyword::suggestions(name);
-                    if !suggestions.is_empty() {
-                        let mut err = self.err(
-                            "Unknown Keyword",
-                            &format!(
-                                "'{}' is not a known keyword, did you mean one of: {}",
-                                name,
-                                suggestions.join(", ").as_str()
-                            ),
-                            self.cur()?,
-                            Rule::UnknownKeyword,
-                        );
-                        err.doc_url = Some("https://sqlite.org/lang_keywords.html");
-                        self.errors.push(err);
-                    } else {
-                        self.errors.push(self.err(
-                            "Unknown Keyword",
-                            &format!("'{name}' is not a known keyword"),
-                            self.cur()?,
-                            Rule::UnknownKeyword,
-                        ));
-                    }
-                }
-                self.skip_until_semicolon_or_eof();
+            Type::Ident(ref name) => {
+                let suggestions = Keyword::suggestions(name);
+                if !suggestions.is_empty() {
+                    let mut err = self.err(
+                        "Unknown Keyword",
+                        &format!(
+                            "'{}' is not an SQL keyword, did you mean one of: {}",
+                            name,
+                            suggestions.join(", ").as_str()
+                        ),
+                        self.cur(),
+                        Rule::UnknownKeyword,
+                    );
+                    err.doc_url = Some("https://sqlite.org/lang_keywords.html");
+                    self.errors.push(err);
+                } else {
+                    self.push_err(
+                        "Unknown Keyword",
+                        &format!("'{name}' is not a keyword"),
+                        &self.cur().clone(),
+                        Rule::UnknownKeyword,
+                    );
+                };
+                self.advance();
                 None
             }
             Type::Keyword(_) => {
-                self.errors.push(self.err(
+                let cur = self.cur().clone();
+                self.push_err(
                     "Unimplemented",
-                    &format!(
-                        "sqleibniz can not yet analyse the token {:?}, skipping ahead to next statement",
-                        self.cur()?.ttype
-                    ),
-                    self.cur()?,
+                    &format!("sqleibniz can not yet analyse the token {:?}", cur.ttype,),
+                    &cur,
                     Rule::Unimplemented,
-                ));
-                self.skip_until_semicolon_or_eof();
+                );
+                self.advance();
                 None
             }
             _ => {
-                self.errors.push(self.err(
+                let cur = self.cur().clone();
+                self.push_err(
                     "Unknown Token",
                     &format!(
                         "sqleibniz does not understand the token {:?}, skipping ahead to next statement",
-                        self.cur()?.ttype
+                        cur.ttype
                     ),
-                    self.cur()?,
+                    &cur,
                     Rule::Unimplemented,
-                ));
+                );
                 self.skip_until_semicolon_or_eof();
                 None
             }
@@ -391,7 +375,7 @@ impl<'a> Parser<'a> {
     #[trace]
     fn alter_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Alter {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             target: SchemaTableContainer::Table(String::new()),
             rename_to: None,
             rename_column_target: None,
@@ -403,16 +387,9 @@ impl<'a> Parser<'a> {
         self.advance();
         self.consume(Type::Keyword(Keyword::TABLE));
 
-        a.target =
-            match self.schema_table_container_ok("https://www.sqlite.org/lang_altertable.html") {
-                Ok(container) => container,
-                Err(err) => {
-                    self.errors.push(err);
-                    a.target
-                }
-            };
+        a.target = self.schema_table_container()?;
 
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             Type::Keyword(Keyword::RENAME) => {
                 self.advance();
                 if self.is(Type::Keyword(Keyword::TO)) {
@@ -444,6 +421,7 @@ impl<'a> Parser<'a> {
                 if self.is(Type::Keyword(Keyword::COLUMN)) {
                     self.advance();
                 }
+
                 a.add_column = self.column_def();
             }
             Type::Keyword(Keyword::DROP) => {
@@ -459,9 +437,9 @@ impl<'a> Parser<'a> {
                     "Unexpected Token",
                     &format!(
                         "ALTER requires either RENAME, ADD or DROP at this point, got {:?}",
-                        self.cur()?.ttype
+                        self.cur().ttype
                     ),
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_altertable.html");
@@ -480,7 +458,7 @@ impl<'a> Parser<'a> {
     #[trace]
     fn reindex_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Reindex {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             target: None,
         };
         self.advance();
@@ -500,7 +478,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/attach-stmt.html
     #[trace]
     fn attach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur()?.clone();
+        let t = self.cur().clone();
         // skipping ATTACH
         self.advance();
         // skipping optional DATABASE
@@ -528,7 +506,7 @@ impl<'a> Parser<'a> {
     #[trace]
     fn release_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Release {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             savepoint_name: String::new(),
         };
         self.advance();
@@ -551,7 +529,7 @@ impl<'a> Parser<'a> {
     #[trace]
     fn savepoint_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut s = nodes::Savepoint {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             savepoint_name: String::new(),
         };
         self.advance();
@@ -570,10 +548,10 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_dropview.html
     #[trace]
     fn drop_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur()?.clone();
+        let t = self.cur().clone();
         self.advance();
 
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             Type::Keyword(Keyword::INDEX) => (),
             Type::Keyword(Keyword::TABLE) => (),
             Type::Keyword(Keyword::TRIGGER) => (),
@@ -583,9 +561,9 @@ impl<'a> Parser<'a> {
                         "Unexpected Token",
                         &format!(
                             "DROP requires either TRIGGER, TABLE, TRIGGER or VIEW at this point, got {:?}",
-                            self.cur()?.ttype
+                            self.cur().ttype
                         ),
-                        self.cur()?,
+                        self.cur(),
                         Rule::Syntax,
                     );
                 err.doc_url = Some("https://www.sqlite.org/lang.html");
@@ -596,11 +574,10 @@ impl<'a> Parser<'a> {
         }
 
         let ttype = {
-            let Type::Keyword(keyword) = &self.cur()?.ttype else {
-                // self.cur() in (in the set theory kind) {INDEX,TABLE,TRIGGER,VIEW}
-                unreachable!()
+            let Type::Keyword(keyword) = &self.cur().ttype else {
+                unreachable!("self.cur() in (in the set theory kind) {{INDEX,TABLE,TRIGGER,VIEW}}")
             };
-            keyword.clone()
+            *keyword
         };
 
         // skip either INDEX;TABLE;TRIGGER or VIEW
@@ -614,13 +591,7 @@ impl<'a> Parser<'a> {
             false
         };
 
-        let argument = match self.schema_table_container_ok("https://www.sqlite.org/lang.html") {
-            Ok(a) => a,
-            Err(e) => {
-                self.errors.push(e);
-                return None;
-            }
-        };
+        let argument = self.schema_table_container()?;
 
         some_box!(nodes::Drop {
             t,
@@ -634,12 +605,59 @@ impl<'a> Parser<'a> {
     #[trace]
     fn analyse_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Analyze {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             target: None,
         };
 
         self.advance();
-        a.target = self.schema_table_container();
+
+        // inlined Parser::schema_table_container
+        a.target = match self.cur().ttype.clone() {
+            Type::Ident(schema) if self.next_is(Type::Dot) => {
+                self.advance();
+                self.advance();
+                if let Type::Ident(table) = &self.cur().ttype {
+                    let table = table.clone();
+                    self.advance();
+                    Some(SchemaTableContainer::SchemaAndTable { schema, table })
+                } else if let Type::String(table) = &self.cur().ttype {
+                    let table = table.clone();
+                    self.advance();
+                    Some(SchemaTableContainer::SchemaAndTable { schema, table })
+                } else {
+                    let cur = self.cur().clone();
+                    self.errors.push(match cur.ttype {
+                        Type::Keyword(keyword) => {
+                            let as_str: &str = keyword.into();
+                            self.err(
+                            "Malformed table name",
+                            &format!("`{as_str}` is a keyword, if you want to use it as a table or column name, quote it: '{as_str}'"),
+                            &cur, Rule::Syntax)
+                        }
+                        _ => self.err(
+                            "Malformed table name",
+                            &format!(
+                                "expected a table name after <schema_name>. - got {:?}",
+                                cur.ttype
+                            ),
+                            &cur,
+                            Rule::Syntax,
+                        ),
+                    });
+
+                    // skip wrong token, should I skip to the next statement via
+                    // self.skip_until_semicolon_or_eof?
+                    self.advance();
+                    None
+                }
+            }
+            Type::Ident(table_name) | Type::String(table_name) => {
+                // skip table_name
+                self.advance();
+                Some(SchemaTableContainer::Table(table_name))
+            }
+            _ => None,
+        };
 
         self.expect_end("https://www.sqlite.org/lang_analyze.html");
 
@@ -649,7 +667,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/detach-stmt.html
     #[trace]
     fn detach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur()?.clone();
+        let t = self.cur().clone();
         self.advance();
 
         // skip optional DATABASE path
@@ -671,21 +689,21 @@ impl<'a> Parser<'a> {
     #[trace]
     fn rollback_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut rollback = nodes::Rollback {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             save_point: None,
         };
         self.advance();
 
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             Type::Keyword(Keyword::TRANSACTION) | Type::Keyword(Keyword::TO) | Type::Semicolon => {}
             _ => {
                 let mut err = self.err(
                     "Unexpected Token",
                     &format!(
                         "ROLLBACK requires TRANSACTION, TO or to end at this point, got {:?}",
-                        self.cur()?.ttype
+                        self.cur().ttype
                     ),
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_transaction.html");
@@ -707,16 +725,16 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
 
-            match self.cur()?.ttype {
+            match self.cur().ttype {
                 Type::Keyword(Keyword::SAVEPOINT) | Type::Ident(_) | Type::Semicolon => {}
                 _ => {
                     let mut err = self.err(
                         "Unexpected Token",
                         &format!(
                             "ROLLBACK requires SAVEPOINT, Ident or to end at this point, got {:?}",
-                            self.cur()?.ttype
+                            self.cur().ttype
                         ),
-                        self.cur()?,
+                        self.cur(),
                         Rule::Syntax,
                     );
                     err.doc_url = Some("https://www.sqlite.org/lang_transaction.html");
@@ -725,16 +743,16 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            if let Type::Ident(str) = &self.cur()?.ttype {
+            if let Type::Ident(str) = &self.cur().ttype {
                 rollback.save_point = Some(String::from(str));
             } else {
                 let mut err = self.err(
                     "Unexpected Token",
                     &format!(
                         "ROLLBACK wants Ident as <savepoint-name>, got {:?}",
-                        self.cur()?.ttype
+                        self.cur().ttype
                     ),
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_transaction.html");
@@ -752,13 +770,13 @@ impl<'a> Parser<'a> {
     #[trace]
     fn commit_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let commit: Option<Box<dyn nodes::Node>> = some_box!(nodes::Commit {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
         });
 
         // skip either COMMIT or END
         self.advance();
 
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             // expected end 1
             Type::Semicolon => (),
             // expected end 2, optional
@@ -768,9 +786,9 @@ impl<'a> Parser<'a> {
                     "Unexpected Token",
                     &format!(
                         "Wanted Keyword(TRANSACTION) or Semicolon, got {:?}",
-                        self.cur()?.ttype
+                        self.cur().ttype
                     ),
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_transaction.html");
@@ -788,7 +806,7 @@ impl<'a> Parser<'a> {
     #[trace]
     fn begin_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut begin: nodes::Begin = nodes::Begin {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             transaction_kind: None,
         };
 
@@ -796,14 +814,14 @@ impl<'a> Parser<'a> {
         self.advance();
 
         // skip modifiers
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             // BEGIN;
             Type::Semicolon => return some_box!(begin),
             Type::Keyword(Keyword::DEFERRED)
             | Type::Keyword(Keyword::IMMEDIATE)
             | Type::Keyword(Keyword::EXCLUSIVE) => {
-                begin.transaction_kind = if let Type::Keyword(word) = &self.cur()?.ttype {
-                    Some(word.clone())
+                begin.transaction_kind = if let Type::Keyword(word) = &self.cur().ttype {
+                    Some(*word)
                 } else {
                     None
                 };
@@ -812,7 +830,7 @@ impl<'a> Parser<'a> {
             _ => {}
         }
 
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             Type::Semicolon => return some_box!(begin),
             // ending
             Type::Keyword(Keyword::TRANSACTION) => self.advance(),
@@ -822,7 +840,7 @@ impl<'a> Parser<'a> {
                 let mut err = self.err(
                     "Unexpected Token",
                     "BEGIN does not allow multiple transaction behaviour modifiers",
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_transaction.html");
@@ -836,9 +854,9 @@ impl<'a> Parser<'a> {
                     "Unexpected Token",
                     &format!(
                         "Wanted any of TRANSACTION, DEFERRED, IMMEDIATE or EXCLUSIVE before this point, got {:?}",
-                        self.cur()?.ttype
+                        self.cur().ttype
                     ),
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_transaction.html");
@@ -855,13 +873,13 @@ impl<'a> Parser<'a> {
     #[trace]
     fn vacuum_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut v = nodes::Vacuum {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             schema_name: None,
             filename: None,
         };
         self.consume(Type::Keyword(Keyword::VACUUM));
 
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             Type::Semicolon | Type::Ident(_) | Type::Keyword(Keyword::INTO) => {}
             _ => {
                 let mut err = self.err(
@@ -871,9 +889,9 @@ impl<'a> Parser<'a> {
                         Type::Keyword(Keyword::INTO),
                         Type::String("<filename>".to_string()),
                         Type::Ident("<schema_name>".to_string()),
-                        self.cur()?.ttype.clone()
+                        self.cur().ttype.clone()
                     ),
-                    &self.cur()?.clone(),
+                    &self.cur().clone(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_vacuum.html");
@@ -883,21 +901,21 @@ impl<'a> Parser<'a> {
         }
 
         // first path
-        if let Type::Semicolon = self.cur()?.ttype {
+        if let Type::Semicolon = self.cur().ttype {
             return some_box!(v);
         }
 
         // if schema_name is specified
-        if let Type::Ident(_) = self.cur()?.ttype {
-            v.schema_name = Some(self.cur()?.clone());
+        if let Type::Ident(_) = self.cur().ttype {
+            v.schema_name = Some(self.cur().clone());
             self.advance(); // skip schema_name
         }
 
         // if INTO keyword is given is specified
-        if let Type::Keyword(Keyword::INTO) = self.cur()?.ttype {
+        if let Type::Keyword(Keyword::INTO) = self.cur().ttype {
             self.advance(); // skip INTO
-            if let Type::String(_) = self.cur()?.ttype {
-                v.filename = Some(self.cur()?.clone());
+            if let Type::String(_) = self.cur().ttype {
+                v.filename = Some(self.cur().clone());
             } else {
                 let mut err = self.err(
                     "Unexpected Token",
@@ -905,9 +923,9 @@ impl<'a> Parser<'a> {
                         "Wanted {:?} for VACUUM stmt with {:?}, got {:?}",
                         Type::String("<filename>".to_string()),
                         Type::Keyword(Keyword::INTO),
-                        self.cur()?.ttype.clone()
+                        self.cur().ttype.clone()
                     ),
-                    &self.cur()?.clone(),
+                    &self.cur().clone(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/lang_vacuum.html");
@@ -924,7 +942,7 @@ impl<'a> Parser<'a> {
     /// see: https://www.sqlite.org/syntax/literal-value.html
     #[trace]
     fn literal_value(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let cur = self.cur()?;
+        let cur = self.cur();
         match cur.ttype {
             Type::String(_)
             | Type::Number(_)
@@ -952,14 +970,14 @@ impl<'a> Parser<'a> {
     /// parses an sql expression: https://www.sqlite.org/syntax/expr.html
     fn expr(&mut self) -> Option<nodes::Expr> {
         let mut e = nodes::Expr {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             literal: None,
             bind: None,
             schema: None,
             table: None,
             column: None,
         };
-        match self.cur()?.ttype {
+        match self.cur().ttype {
             // literal value
             Type::String(_)
             | Type::Number(_)
@@ -977,7 +995,7 @@ impl<'a> Parser<'a> {
                 // use of this parameter format is discouraged. Programmers are encouraged to use
                 // one of the symbolic formats [...] or the ?NNN format [...] instead.
                 let mut param = BindParameter {
-                    t: self.cur()?.clone(),
+                    t: self.cur().clone(),
 
                     counter: None,
                     name: None,
@@ -985,10 +1003,10 @@ impl<'a> Parser<'a> {
                 self.advance();
 
                 // question mark can have a number after them, but they are optional
-                if let Some(Token {
+                if let Token {
                     ttype: Type::Number(_),
                     ..
-                }) = self.cur()
+                } = self.cur()
                 {
                     param.counter = self.literal_value();
                 }
@@ -997,22 +1015,22 @@ impl<'a> Parser<'a> {
             // bind parameter with required ident: [:@$]<ident>
             Type::Colon | Type::At | Type::Dollar => {
                 let mut bind = BindParameter {
-                    t: self.cur()?.clone(),
+                    t: self.cur().clone(),
                     counter: None,
                     name: None,
                 };
                 self.advance();
 
                 // all bind params need an identifier, because they need to be named
-                if let Some(Token {
+                if let Token {
                     ttype: Type::Ident(ident),
                     ..
-                }) = self.cur()
+                } = self.cur()
                 {
                     bind.name = Some(ident.clone());
                     self.advance();
                 } else {
-                    self.errors.push(self.err(
+                    self.push_err(
                         "Invalid bind parameter",
                         &format!(
                             "Bind parameter with {:?} requires an identifier as a postfix",
@@ -1020,7 +1038,7 @@ impl<'a> Parser<'a> {
                         ),
                         &bind.t,
                         Rule::Syntax,
-                    ));
+                    );
                     // skip invalid token
                     self.advance();
                     return None;
@@ -1037,16 +1055,16 @@ impl<'a> Parser<'a> {
                 todo!("[schema-name.][table-name.]<column-name>");
             }
             _ => {
-                let t = self.cur()?;
-                self.errors.push(self.err(
+                let cur = self.cur().clone();
+                self.push_err(
                     "Invalid construct",
                     &format!(
                         "At this point in an expression, {:?} is not a valid construct",
-                        t.ttype
+                        cur.ttype
                     ),
-                    t,
+                    &cur,
                     Rule::Syntax,
-                ));
+                );
                 self.advance();
                 return None;
             }
@@ -1054,75 +1072,72 @@ impl<'a> Parser<'a> {
         Some(e)
     }
 
-    /// wraps [Parser::schema_table_container], returns a Result containing an Error if [Parser::schema_table_container] returns Option::None
-    #[trace]
-    fn schema_table_container_ok(
-        &mut self,
-        doc: &'static str,
-    ) -> Result<SchemaTableContainer, Error> {
-        match self.schema_table_container() {
-            Some(t) => Ok(t),
-            None => {
-                let cur = match self.cur() {
-                    Some(cur) => cur,
-                    None => match self.tokens.get(self.pos - 1) {
-                        Some(prev) => prev,
-                        None => panic!(
-                            "Parser::tokens::get(Parser::pos-1) is Option::None at Parser::schema_table_container_ok(), this should not happen"
-                        ),
-                    },
-                };
-                let mut err = self.err(
-                    "Missing schema_name or table_name",
-                    &format!(
-                        "expected either Ident(<schema_name.table_name>) or Ident(<table_name>) at this point, got {:?}",
-                        cur.ttype
-                    ),
-                    cur,
-                    Rule::Syntax,
-                );
-                err.doc_url = Some(doc);
-                Err(err)
-            }
-        }
-    }
-
-    /// parses schema_name.table_name and table_name, this does only emit errors for syntax issues, otherwise, use [Parser::schema_table_container_ok]
+    /// parses schema_name.table_name and table_name
     #[trace]
     fn schema_table_container(&mut self) -> Option<SchemaTableContainer> {
-        match self.cur()?.ttype.clone() {
+        match self.cur().ttype.clone() {
             Type::Ident(schema) if self.next_is(Type::Dot) => {
                 // skip schema_name
                 self.advance();
                 // skip Type::Dot
                 self.advance();
-                if let Type::Ident(table) = self.cur()?.ttype.clone() {
+                if let Type::Ident(table) = &self.cur().ttype {
+                    let table = table.clone();
+                    // skip table_name
+                    self.advance();
+                    Some(SchemaTableContainer::SchemaAndTable { schema, table })
+                } else if let Type::String(table) = &self.cur().ttype {
+                    let table = table.clone();
                     // skip table_name
                     self.advance();
                     Some(SchemaTableContainer::SchemaAndTable { schema, table })
                 } else {
-                    // we got schema_name. but no identifier following? this is a syntax error (i
-                    // think?)
-                    self.errors.push(self.err(
-                        "Missing table_name",
-                        &format!(
-                            "expected a Ident(<table_name>) after getting Ident(<schema_name>) and Type::Dot ('.'), got {:?}",
-                            self.cur()?.ttype
+                    // we got schema_name. but not Ident|String following? this is a syntax error
+                    let cur = self.cur().clone();
+                    self.errors.push(match cur.ttype {
+                        Type::Keyword(keyword) => {
+                            let as_str: &str = keyword.into();
+                            self.err(
+                            "Malformed table name",
+                            &format!("`{as_str}` is a keyword, if you want to use it as a table or column name, quote it: '{as_str}'"),
+                            &cur, Rule::Syntax)
+                        }
+                        _ => self.err(
+                            "Malformed table name",
+                            &format!(
+                                "expected a table name after <schema_name>. - got {:?}",
+                                cur.ttype
+                            ),
+                            &cur,
+                            Rule::Syntax,
                         ),
-                        self.cur()?,
-                        Rule::Syntax,
-                    ));
-                    // skip wrong token
+                    });
+
+                    // skip wrong token, should I skip to the next statement via
+                    // self.skip_until_semicolon_or_eof?
                     self.advance();
                     None
                 }
             }
-            Type::Ident(table_name) => {
+            Type::Ident(table_name) | Type::String(table_name) => {
                 // skip table_name
                 self.advance();
                 Some(SchemaTableContainer::Table(table_name))
             }
-            _ => None,
+            _ => {
+                let cur = self.cur().clone();
+                self.push_err(
+                    "Malformed table name",
+                    &format!(
+                        "expected either schema_name.table_name or table_name, got {:?}",
+                        cur.ttype
+                    ),
+                    &cur,
+                    Rule::Syntax,
+                );
+                self.advance();
+                None
+            }
         }
     }
 
@@ -1132,25 +1147,25 @@ impl<'a> Parser<'a> {
         if self.is_keyword(Keyword::ON) {
             self.advance();
             self.consume_keyword(Keyword::CONFLICT);
-            if let Type::Keyword(keyword) = &self.cur()?.ttype {
+            if let Type::Keyword(keyword) = &self.cur().ttype {
                 match keyword {
                     Keyword::ROLLBACK
                     | Keyword::ABORT
                     | Keyword::FAIL
                     | Keyword::IGNORE
                     | Keyword::REPLACE => {
-                        let k = keyword.clone();
+                        let keyword = *keyword;
                         self.advance();
-                        return Some(k);
+                        return Some(keyword);
                     }
                     _ => {
                         let mut err = self.err(
                             "Unexpected Keyword",
                             &format!(
                                 "Wanted either ROLLBACK, ABORT, FAIL, IGNORE or REPLACE after ON CONFLICT, got {:?}.",
-                                self.cur()?.ttype
+                                self.cur().ttype
                             ),
-                            self.cur()?,
+                            self.cur(),
                             Rule::Syntax,
                         );
                         err.doc_url = Some("https://www.sqlite.org/syntax/conflict-clause.html");
@@ -1162,9 +1177,9 @@ impl<'a> Parser<'a> {
                     "Unexpected Keyword",
                     &format!(
                         "Wanted either ROLLBACK, ABORT, FAIL, IGNORE or REPLACE after ON CONFLICT, got {:?}.",
-                        self.cur()?.ttype
+                        self.cur().ttype
                     ),
-                    self.cur()?,
+                    self.cur(),
                     Rule::Syntax,
                 );
                 err.doc_url = Some("https://www.sqlite.org/syntax/conflict-clause.html");
@@ -1183,23 +1198,25 @@ impl<'a> Parser<'a> {
         let mut is_delete = false;
         if self.is_keyword(Keyword::ON) {
             self.advance();
-            match &self.cur()?.ttype {
+
+            match &self.cur().ttype {
                 Type::Keyword(Keyword::DELETE) => is_delete = true,
                 Type::Keyword(Keyword::UPDATE) => (),
                 _ => {
                     let mut err = self.err(
                         "Unexpected Token",
-                        &format!("Wanted DELETE or UPDATE, got {:?}.", self.cur()?.ttype),
-                        self.cur()?,
+                        &format!("Wanted DELETE or UPDATE, got {:?}.", self.cur().ttype),
+                        self.cur(),
                         Rule::Syntax,
                     );
                     err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
                     self.errors.push(err);
                 }
             };
+
             self.advance();
 
-            let action = match self.cur()?.ttype {
+            let action = match self.cur().ttype {
                 Type::Keyword(Keyword::CASCADE) => {
                     self.advance();
                     Some(ForeignKeyAction::Cascade)
@@ -1215,21 +1232,23 @@ impl<'a> Parser<'a> {
                 }
                 Type::Keyword(Keyword::SET) => {
                     self.advance();
-                    Some(if self.is_keyword(Keyword::NULL) {
+                    let a = Some(if self.is_keyword(Keyword::NULL) {
                         ForeignKeyAction::SetNull
                     } else {
                         self.consume_keyword(Keyword::DEFAULT);
                         ForeignKeyAction::SetDefault
-                    })
+                    });
+                    self.advance();
+                    a
                 }
                 _ => {
                     let mut err = self.err(
                         "Unexpected Token",
                         &format!(
                             "Wanted SET, CASCADE, RESTRICT or NO after ON DELETE/UPDATE, got {:?}.",
-                            self.cur()?.ttype
+                            self.cur().ttype
                         ),
-                        self.cur()?,
+                        self.cur(),
                         Rule::Syntax,
                     );
                     err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
@@ -1248,7 +1267,7 @@ impl<'a> Parser<'a> {
             self.foreign_key_clause_on_and_match(fk)
         } else if self.is_keyword(Keyword::MATCH) {
             self.advance();
-            fk.match_type = match self.cur()?.ttype {
+            fk.match_type = match self.cur().ttype {
                 Type::Keyword(Keyword::FULL) => Some(ForeignKeyMatch::Full),
                 Type::Keyword(Keyword::PARTIAL) => Some(ForeignKeyMatch::Partial),
                 Type::Keyword(Keyword::SIMPLE) => Some(ForeignKeyMatch::Simple),
@@ -1310,7 +1329,7 @@ impl<'a> Parser<'a> {
             self.consume_keyword(Keyword::DEFERRABLE);
             if self.is_keyword(Keyword::INITIALLY) {
                 self.advance();
-                match &self.cur()?.ttype {
+                match &self.cur().ttype {
                     Type::Keyword(Keyword::DEFERRED) => fk.initially_deferred = true,
                     Type::Keyword(Keyword::IMMEDIATE) => (),
                     _ => {
@@ -1318,9 +1337,9 @@ impl<'a> Parser<'a> {
                         "Unexpected Keyword",
                         &format!(
                             "Wanted DEFERRED or IMMEDIATE after DEFERRABLE INITIALLY, got {:?}.",
-                            self.cur()?.ttype
+                            self.cur().ttype
                         ),
-                        self.cur()?,
+                        self.cur(),
                         Rule::Syntax,
                     );
                         err.doc_url = Some("https://www.sqlite.org/syntax/foreign-key-clause.html");
@@ -1343,7 +1362,7 @@ impl<'a> Parser<'a> {
     #[trace]
     fn column_def(&mut self) -> Option<nodes::ColumnDef> {
         let mut def = nodes::ColumnDef {
-            t: self.cur()?.clone(),
+            t: self.cur().clone(),
             name: String::new(),
             type_name: None,
             constraints: vec![],
@@ -1352,23 +1371,36 @@ impl<'a> Parser<'a> {
         def.name = self.consume_ident("https://www.sqlite.org/syntax/column-def.html", "name")?;
 
         // we got a type_name: https://www.sqlite.org/syntax/type-name.html
-        while let Type::Ident(name) = &self.cur()?.ttype {
+        if let Type::Ident(name) = &self.cur().ttype {
             def.type_name = Some(SqliteStorageClass::from_str(name));
-            // skip ident
+
+            if SqliteStorageClass::from_str_strict(name.as_str()).is_none() {
+                let mut e = self.err(
+                    format!("Type `{name}` is not a sqlite type and thus will be of type INTEGER"),
+                    "Consider using a known sqlite type: TEXT, BLOB, REAL or INTEGER",
+                    self.cur(),
+                    Rule::Quirk,
+                );
+                e.doc_url = Some("https://www.sqlite.org/datatype3.html");
+                self.errors.push(e);
+            }
+
+            // skip type name
             self.advance();
+
             if self.is(Type::BraceLeft) {
                 // skip Type::BraceLeft
                 self.advance();
-                if let Type::Number(_) = self.cur()?.ttype {
+                if let Type::Number(_) = self.cur().ttype {
                     self.advance();
                 } else {
                     let mut err = self.err(
                         "Unexpected Token",
                         &format!(
                             "Wanted a Number after Type::BraceLeft, got {:?}.",
-                            self.cur()?.ttype
+                            self.cur().ttype
                         ),
-                        self.cur()?,
+                        self.cur(),
                         Rule::Syntax,
                     );
                     err.doc_url = Some("https://www.sqlite.org/syntax/type-name.html");
@@ -1378,16 +1410,16 @@ impl<'a> Parser<'a> {
 
                 if self.is(Type::Comma) {
                     self.advance();
-                    if let Type::Number(_) = self.cur()?.ttype {
+                    if let Type::Number(_) = self.cur().ttype {
                         self.advance();
                     } else {
                         let mut err = self.err(
                             "Unexpected Token",
                             &format!(
                                 "Wanted a Number after Type::BraceLeft, Type::Number and Type::Comma, got {:?}.",
-                                self.cur()?.ttype
+                                self.cur().ttype
                             ),
-                            self.cur()?,
+                            self.cur(),
                             Rule::Syntax,
                         );
                         err.doc_url = Some("https://www.sqlite.org/syntax/type-name.html");
@@ -1402,7 +1434,7 @@ impl<'a> Parser<'a> {
         // column_constraint: https://www.sqlite.org/syntax/column-constraint.html
         while !self.is_eof()
             && matches!(
-                self.cur()?.ttype,
+                self.cur().ttype,
                 Type::Keyword(Keyword::CONSTRAINT)
                     | Type::Keyword(Keyword::PRIMARY)
                     | Type::Keyword(Keyword::NOT)
@@ -1427,7 +1459,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.consume_keyword(Keyword::KEY);
                 let asc_desc =
-                    if let Type::Keyword(k @ (Keyword::ASC | Keyword::DESC)) = &self.cur()?.ttype {
+                    if let Type::Keyword(k @ (Keyword::ASC | Keyword::DESC)) = &self.cur().ttype {
                         let k = *k;
                         self.advance();
                         Some(k)
@@ -1477,7 +1509,8 @@ impl<'a> Parser<'a> {
                     })
                 } else {
                     // this aint so pretty, but sometimes i do need literals as Option<Box<dyn
-                    // Box>> and sometimes as Option<Literal>, it is what it is
+                    // Box>> and sometimes as Option<Literal>, it is what it is, Nodes sadly dont
+                    // care about my feelings :(
                     let lit = self.literal_value();
                     Some(ColumnConstraint::Default {
                         literal: lit.map(|n| nodes::Literal {
@@ -1495,7 +1528,9 @@ impl<'a> Parser<'a> {
             } else if self.is_keyword(Keyword::REFERENCES) {
                 Some(ColumnConstraint::ForeignKey(self.foreign_key_clause()?))
             } else if self.is_keyword(Keyword::GENERATED) || self.is_keyword(Keyword::AS) {
+                let mut is_generated = false;
                 if self.is_keyword(Keyword::GENERATED) {
+                    is_generated = true;
                     self.advance();
                     self.consume_keyword(Keyword::ALWAYS);
                 }
@@ -1507,7 +1542,7 @@ impl<'a> Parser<'a> {
 
                 let stored_virtual =
                     if let Type::Keyword(k @ (Keyword::STORED | Keyword::VIRTUAL)) =
-                        &self.cur()?.ttype
+                        &self.cur().ttype
                     {
                         let k = *k;
                         self.advance();
@@ -1515,10 +1550,18 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                Some(ColumnConstraint::Generated {
-                    expr,
-                    stored_virtual,
-                })
+
+                if is_generated {
+                    Some(ColumnConstraint::Generated {
+                        expr,
+                        stored_virtual,
+                    })
+                } else {
+                    Some(ColumnConstraint::As {
+                        expr,
+                        stored_virtual,
+                    })
+                }
             } else {
                 None
             };

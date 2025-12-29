@@ -106,7 +106,7 @@ impl<'a> Lexer<'a> {
             if self.is_eof() || self.is('\n') {
                 let mut err = self.err(
                     "Unterminated String",
-                    "Consider adding a \"'\" at the end of this string",
+                    "Consider adding a ' at the end of this string",
                     line_start,
                     Rule::UnterminatedString,
                 );

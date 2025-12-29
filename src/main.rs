@@ -10,8 +10,6 @@ use lexer::Lexer;
 use types::config::Config;
 use types::rules::Rule;
 
-use crate::parser::nodes::Node;
-
 /// error does formatting and highlighting for errors
 mod error;
 /// highlight implements logic for highlighting tokens found in a string
@@ -63,6 +61,7 @@ struct Cli {
     /// invoke sqleibniz as a language server
     #[arg(long)]
     lsp: bool,
+    // TODO: add a --doc <fuzzy ast node / ast name> to print node documentation
 }
 
 fn configuration(lua: &mlua::Lua, file_name: &str) -> Result<Config, String> {
@@ -201,9 +200,7 @@ fn main() {
             {
                 println!("{:=^72}", " AST ");
                 for node in &ast {
-                    if let Some(node) = node {
-                        node.display(0);
-                    }
+                    node.display(0);
                 }
             }
 
@@ -212,7 +209,7 @@ fn main() {
                     "{}",
                     serde_json::to_string_pretty(
                         &ast.iter()
-                            .flat_map(|n| { n.as_ref().map(|n| n.as_serializable()) })
+                            .map(|n| n.as_ref().as_serializable())
                             .collect::<Vec<_>>()
                     )
                     .unwrap_or_default()
@@ -220,10 +217,7 @@ fn main() {
             }
 
             if args.ast {
-                println!(
-                    "{:#?}",
-                    &ast.iter().flatten().collect::<Vec<&Box<dyn Node>>>()
-                );
+                println!("{:#?}", &ast);
             }
 
             errors.push(parser.errors);

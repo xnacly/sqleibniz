@@ -10,7 +10,10 @@ use lsp_types::{
     request::{DocumentDiagnosticRequest, HoverRequest},
 };
 
-use crate::{lexer::Lexer, parser::Parser, types::Token};
+use crate::{
+    lexer::Lexer,
+    parser::{Parser, nodes::Node},
+};
 
 macro_rules! lsp_log {
     ($literal:literal) => {
@@ -71,7 +74,7 @@ pub fn start() -> Result<(), LspError> {
 fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), LspError> {
     let _params: InitializeParams = serde_json::from_value(params).unwrap();
     lsp_log!("starting event loop");
-    let mut tokens: Vec<Token> = vec![];
+    let mut ast: Vec<Box<dyn Node>> = vec![];
     let mut errors: Vec<super::error::Error> = vec![];
     for msg in &connection.receiver {
         eprintln!("got msg: {msg:?}");
@@ -86,7 +89,7 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                         match cast::<HoverRequest>(req) {
                             Ok((id, params)) => {
                                 if let Err(e) =
-                                    handlers::hover::handle(&connection, &tokens, id, params)
+                                    handlers::hover::handle(&connection, &ast, id, params)
                                 {
                                     eprintln!("[sqleibniz]: err: {}", e);
                                 }
@@ -126,10 +129,10 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                             let formatted_path =
                                 params.text_document.uri.to_string().replace("file://", "");
                             let mut l = Lexer::new(text, &formatted_path);
-                            tokens = l.run();
+                            let tokens = l.run();
                             errors = l.errors;
-                            let mut p = Parser::new(tokens.clone(), &formatted_path);
-                            let _ = p.parse();
+                            let mut p = Parser::new(tokens, &formatted_path);
+                            ast = p.parse();
                             errors.append(&mut p.errors);
                         }
                         Err(err) => panic!("failed to cast notification: {err:?}"),
@@ -142,10 +145,10 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                             let formatted_path =
                                 params.text_document.uri.to_string().replace("file://", "");
                             let mut l = Lexer::new(text, &formatted_path);
-                            tokens = l.run();
+                            let tokens = l.run();
                             errors = l.errors;
-                            let mut p = Parser::new(tokens.clone(), &formatted_path);
-                            let _ = p.parse();
+                            let mut p = Parser::new(tokens, &formatted_path);
+                            ast = p.parse();
                             errors.append(&mut p.errors);
                         }
                         Err(err) => panic!("failed to cast notification: {err:?}"),

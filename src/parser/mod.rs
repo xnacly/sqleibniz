@@ -193,13 +193,13 @@ impl<'a> Parser<'a> {
     }
 
     #[trace]
-    pub fn parse(&mut self) -> Vec<Option<Box<dyn nodes::Node>>> {
+    pub fn parse(&mut self) -> Vec<Box<dyn nodes::Node>> {
         self.sql_stmt_list()
     }
 
     /// see: https://www.sqlite.org/syntax/sql-stmt-list.html
     #[trace]
-    fn sql_stmt_list(&mut self) -> Vec<Option<Box<dyn nodes::Node>>> {
+    fn sql_stmt_list(&mut self) -> Vec<Box<dyn nodes::Node>> {
         let mut r = vec![];
         while !self.is_eof() {
             if let Token {
@@ -217,8 +217,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
             }
-            let stmt = self.sql_stmt_prefix();
-            if stmt.is_some() {
+            if let Some(stmt) = self.sql_stmt_prefix() {
                 r.push(stmt);
             }
             self.consume(Type::Semicolon);

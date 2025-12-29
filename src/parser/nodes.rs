@@ -73,6 +73,10 @@ macro_rules! node {
 
                 serde_json::Value::Object(map)
             }
+
+            fn doc(&self) -> &str {
+                $documentation
+            }
         }
 
         impl $node_name {
@@ -99,26 +103,48 @@ pub trait Node: std::fmt::Debug {
     #[cfg(feature = "trace")]
     fn display(&self, indent: usize);
     fn name(&self) -> &str;
+    /// serializes self as json
     fn as_serializable(&self) -> serde_json::Value;
+    /// returns the documentation url for sefl
+    fn doc(&self) -> &str;
+
     // TODO: every node should analyse its own contents after the ast was build, to do so the Node
     // trait should enforce a analyse(&self, ctx &types::ctx::Context) -> Vec<Error> function.
 }
 
 node!(
     Literal,
-    "holds all literal types, such as strings, numbers, etc.",
+    r"Literal value, see: https://www.sqlite.org/lang_expr.html#literal_values_constants_
+
+A literal value represents a constant. Literal values may be integers, floating point numbers, strings, BLOBs, or NULLs.",
 );
 
 node!(
     BindParameter,
-    "Bind parameter: https://www.sqlite.org/lang_expr.html#parameters",
+    r"Bind parameter, see https://www.sqlite.org/lang_expr.html#parameters
+
+A parameter specifies a placeholder in the expression for a value that is filled in at runtime.
+These can take several forms:
+
+- `?NNN`: A question mark followed by a number NNN holds a spot for the NNN-th parameter.
+- `?`: A question mark that is not followed by a number creates a parameter with a number one
+  greater than the largest parameter number already assigned. (Discouraged - in sqleibniz, this format
+  produces an Error)
+- `:AAAA`: A colon followed by an identifier name holds a spot for a named parameter with the name
+  `:AAAA`
+- `@AAAA`: An 'at' sign works exactly like a colon, except that the name of the parameter created
+  is @AAAA.
+- `$AAAA`: A dollar-sign followed by an identifier name also holds a spot for a named parameter
+  with the name $AAAA. Sqlite allows everything to follow after '$()', sqleibniz forbids this via
+  Rule::Quirks errors
+",
     counter: Option<Box<dyn Node>>,
     name: Option<String>
 );
 
 node!(
     Expr,
-    "Expr expression, see: https://www.sqlite.org/lang_expr.html#varparam",
+    "Expr expression, see: https://www.sqlite.org/lang_expr.html",
     literal: Option<Token>,
     bind: Option<BindParameter>,
     schema: Option<String>,
@@ -128,38 +154,86 @@ node!(
 
 node!(
     Explain,
-    "Explain stmt, see: https://www.sqlite.org/lang_explain.html",
+   r"Explain stmt, see: https://www.sqlite.org/lang_explain.html
+
+An SQL statement can be preceded by the keyword 'EXPLAIN' or by the phrase 'EXPLAIN QUERY PLAN'.
+Either modification causes the SQL statement to behave as a query and to return information about
+how the SQL statement would have operated if the EXPLAIN keyword or phrase had been omitted.
+
+In depth guide for `EXPLAIN QUERY PLAN`: https://www.sqlite.org/eqp.html
+",
     child: Box<dyn Node>
 );
 
-node!(Vacuum,"Vacuum stmt, see: https://www.sqlite.org/lang_vacuum.html", schema_name: Option<Token>, filename: Option<Token>);
+node!(
+    Vacuum,
+    r"Vacuum stmt, see: https://www.sqlite.org/lang_vacuum.html
+
+The VACUUM command rebuilds the database file, repacking it into a minimal amount of disk space. ",
+    schema_name: Option<Token>,
+    filename: Option<Token>
+);
 
 node!(
     Begin,
-    "Begin stmt, see: https://www.sqlite.org/syntax/begin-stmt.html",
+    r"Begin stmt, see: https://www.sqlite.org/lang_transaction.html
+
+Transactions can be started manually using the BEGIN command. Such transactions usually persist
+until the next COMMIT or ROLLBACK command. But a transaction will also ROLLBACK if the database is
+closed or if an error occurs and the ROLLBACK conflict resolution algorithm is specified
+
+Transactions can be DEFERRED, IMMEDIATE, or EXCLUSIVE. The default transaction behavior is
+DEFERRED. 
+",
     transaction_kind: Option<Keyword>
 );
 
 node!(
     Commit,
-    "Commit stmt, see: https://www.sqlite.org/syntax/commit-stmt.html",
+    r"Commit stmt, see: https://www.sqlite.org/lang_transaction.html
+
+END TRANSACTION is an alias for COMMIT. Transactions created using BEGIN...COMMIT do not nest. For
+nested transactions, use the SAVEPOINT and RELEASE commands.
+",
 );
 
 node!(
     Rollback,
-    "Rollback stmt, see: https://www.sqlite.org/syntax/rollback-stmt.html",
+    r"Rollback stmt, see:  https://www.sqlite.org/lang_savepoint.html
+
+The ROLLBACK TO command reverts the state of the database back to what it was just after the
+corresponding SAVEPOINT. Note that unlike that plain ROLLBACK command (without the TO keyword) the
+ROLLBACK TO command does not cancel the transaction. Instead of cancelling the transaction, the
+ROLLBACK TO command restarts the transaction again at the beginning. All intervening SAVEPOINTs are
+canceled, however.
+",
     save_point: Option<String>
 );
 
 node!(
     Detach,
-    "Rollback stmt, see: https://www.sqlite.org/syntax/rollback-stmt.html",
+    r"Detach stmt, see: https://www.sqlite.org/lang_detach.html
+
+This statement detaches an additional database connection previously attached using the ATTACH
+statement. When not in shared cache mode, it is possible to have the same database file attached
+multiple times using different names, and detaching one connection to a file will leave the others
+intact.
+",
     schema_name: String
 );
 
 node!(
     Analyze,
-    "Analyze stmt, see: https://www.sqlite.org/lang_analyze.html",
+    r"Analyze stmt, see: https://www.sqlite.org/lang_analyze.html
+
+The ANALYZE command gathers statistics about tables and indices and stores the collected
+information in internal tables of the database where the query optimizer can access the
+information and use it to help make better query planning choices. If no arguments are given, the
+main database and all attached databases are analyzed. If a schema name is given as the argument,
+then all tables and indices in that one database are analyzed. If the argument is a table name,
+then only that table and the indices associated with that table are analyzed. If the argument is
+an index name, then only that one index is analyzed.
+    ",
     target: Option<SchemaTableContainer>
 );
 
@@ -174,7 +248,35 @@ pub enum SchemaTableContainer {
 
 node!(
     Drop,
-    "Drop stmt, see: https://www.sqlite.org/lang_dropindex.html, https://www.sqlite.org/lang_droptable.html, https://www.sqlite.org/lang_droptrigger.html and https://www.sqlite.org/lang_dropview.html",
+    r"Drop stmt
+
+## DROP INDEX
+
+The DROP INDEX statement removes an index added with the CREATE INDEX statement. The index is
+completely removed from the disk. The only way to recover the index is to reenter the appropriate
+CREATE INDEX command, see https://www.sqlite.org/lang_dropindex.html.
+
+## DROP TABLE
+
+The DROP TABLE statement removes a table added with the CREATE TABLE statement. The name specified
+is the table name. The dropped table is completely removed from the database schema and the disk
+file. The table can not be recovered. All indices and triggers associated with the table are also
+deleted, see: https://www.sqlite.org/lang_droptable.html.
+                    
+## DROP TRIGGER
+
+The DROP TRIGGER statement removes a trigger created by the CREATE TRIGGER statement. Once removed, the trigger definition 
+is no longer present in the sqlite_schema (or sqlite_temp_schema) table and is not fired by any subsequent
+INSERT, UPDATE or DELETE statements, see: https://www.sqlite.org/lang_droptrigger.html.
+                                                
+## DROP VIEW
+
+The DROP VIEW statement removes a view created by the CREATE VIEW statement. 
+The view definition is removed from the database schema,
+but no actual data in the underlying base tables is modified,
+see: https://www.sqlite.org/lang_dropview.html.
+
+",
     if_exists: bool,
     ttype: Keyword,
     argument: SchemaTableContainer
@@ -182,33 +284,54 @@ node!(
 
 node!(
     Savepoint,
-    "Savepoint stmt, see: https://www.sqlite.org/lang_savepoint.html",
+    r"Savepoint stmt, see: https://www.sqlite.org/lang_savepoint.html
+
+SAVEPOINTs are a method of creating transactions, similar to BEGIN and COMMIT, except that the
+SAVEPOINT and RELEASE commands are named and may be nested.
+",
     savepoint_name: String
 );
 
 node!(
     Release,
-    "Release stmt, see: https://www.sqlite.org/lang_savepoint.html",
+    r"Release stmt, see: https://www.sqlite.org/lang_savepoint.html
+
+The RELEASE command is like a COMMIT for a SAVEPOINT. The RELEASE command causes all savepoints
+back to and including the most recent savepoint with a matching name to be removed from the
+transaction stack.
+",
     savepoint_name: String
 );
 
 node!(
     Attach,
-    "Attach stmt, see: https://www.sqlite.org/lang_attach.html",
+    "Attach stmt, see: https://www.sqlite.org/lang_attach.html
+
+The ATTACH DATABASE statement adds another database file to the current database connection.
+Database files that were previously attached can be removed using the DETACH DATABASE command. 
+",
     schema_name: String,
     expr: Expr
 );
 
 node!(
     Reindex,
-    "Reindex stmt, see: https://www.sqlite.org/lang_reindex.html",
+    r"Reindex stmt, see: https://www.sqlite.org/lang_reindex.html
+
+The REINDEX command is used to delete and recreate indices from scratch. This is useful when the
+definition of a collation sequence has changed, or when there are indexes on expressions involving
+a function whose definition has changed.",
     target: Option<SchemaTableContainer>
 );
 
 node!(
     Alter,
-    "Alter stmt, see: https://www.sqlite.org/lang_altertable.html
-SQLite supports a limited subset of ALTER TABLE. The ALTER TABLE command in SQLite allows these alterations of an existing table: it can be renamed; a column can be renamed; a column can be added to it; or a column can be dropped from it.",
+    r"Alter stmt, see: https://www.sqlite.org/lang_altertable.html
+
+SQLite supports a limited subset of ALTER TABLE:
+The ALTER TABLE command in SQLite allows these alterations of an existing table: a table can be
+renamed, a column can be renamed, a column can be added to a table or a column can be dropped
+from the table.",
     target: SchemaTableContainer,
     rename_to: Option<String>,
     rename_column_target: Option<String>,

@@ -53,8 +53,12 @@ struct Cli {
     #[clap(value_enum)]
     disable: Option<Vec<Rule>>,
 
+    /// dump the abstract syntax tree as pretty printed json
     #[arg(long)]
-    dump_ast: bool,
+    ast_json: bool,
+    /// dump the abstract syntax tree as rusts pretty printed debugging
+    #[arg(long)]
+    ast: bool,
 
     /// invoke sqleibniz as a language server
     #[arg(long)]
@@ -202,17 +206,26 @@ fn main() {
                     }
                 }
             }
-            if args.dump_ast {
+
+            if args.ast_json {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(
-                        &ast.into_iter()
-                            .flat_map(|n| { n.map(|n| n.as_serializable()) })
+                        &ast.iter()
+                            .flat_map(|n| { n.as_ref().map(|n| n.as_serializable()) })
                             .collect::<Vec<_>>()
                     )
                     .unwrap_or_default()
                 );
             }
+
+            if args.ast {
+                println!(
+                    "{:#?}",
+                    &ast.iter().flatten().collect::<Vec<&Box<dyn Node>>>()
+                );
+            }
+
             errors.push(parser.errors);
         }
 

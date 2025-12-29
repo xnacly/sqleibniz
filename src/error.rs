@@ -51,8 +51,8 @@ impl Color {
             Self::Green => "\x1b[92m",
             Self::Yellow => "\x1b[93m",
             Self::Cyan => "\x1b[96m",
-            Self::Grey => "\x1b[90m",
-            Self::Magenta => "\x1b[35m",
+            Self::Grey => "\x1b[37m",
+            Self::Magenta => "\x1b[95m",
             Self::Orange => "\x1b[33m",
             Self::White => "\x1b[97m",
         }
@@ -93,7 +93,7 @@ impl Error {
         }
 
         print_str_colored(b, " -> ", Color::Blue);
-        // the file is not absolut, this resolves symlinks and stuff
+        // the file is not absolute, this resolves symlinks and stuff
         let file_path = match fs::canonicalize(PathBuf::from(&self.file)) {
             Ok(path) => path.into_os_string().into_string().unwrap_or_default(),
             _ => self.file.clone(),
@@ -115,102 +115,33 @@ impl Error {
             self.end = 0;
         }
 
-        if self.line >= 2 {
-            if let Some(first_line) = lines.get(self.line - 2) {
-                print_str_colored(b, &format!(" {:02} | ", self.line - 1), Color::Blue);
-                highlight(
-                    b,
-                    &tokens
-                        .iter()
-                        .filter(|t| t.line == self.line - 2)
-                        .collect::<Vec<&Token>>(),
-                    first_line,
-                );
-                b.write_char('\n');
-            }
+        let start_line = self.line.saturating_sub(2);
+        let end_line = usize::min(self.line + 2, lines.len() - 1);
 
-            if let Some(sec_line) = lines.get(self.line - 1) {
-                print_str_colored(b, &format!(" {:02} | ", self.line), Color::Blue);
-                highlight(
-                    b,
-                    &tokens
-                        .iter()
-                        .filter(|t| t.line == self.line - 1)
-                        .collect::<Vec<&Token>>(),
-                    sec_line,
-                );
-                b.write_char('\n');
-            }
-        }
-
-        let offending_line = lines.get(self.line).unwrap();
-        print_str_colored(b, &format!(" {:02} | ", self.line + 1), Color::Blue);
-        highlight(
-            b,
-            &tokens
-                .iter()
-                .filter(|t| t.line == self.line)
-                .collect::<Vec<&Token>>(),
-            offending_line,
-        );
-        print_str_colored(b, "\n    |", Color::Blue);
-
-        let mut repeat = 1;
-        if self.end > self.start {
-            repeat = self.end - self.start;
-        }
-
-        print_str_colored(
-            b,
-            &format!(
-                " {}{} error occurs here.\n",
-                " ".repeat(self.start),
-                "~".repeat(repeat)
-            ),
-            Color::Red,
-        );
-
-        // TODO: rework this, inconsistently corret
-        // if let Some(new) = &self.improved_line {
-        //     print_str_colored("    + ", Color::Green);
-        //     print_str!(offending_line);
-        //     print_str_colored(&new.snippet, Color::Green);
-        //     print_str_colored("\n    | ", Color::Blue);
-        //     print_str_colored(
-        //         &format!(
-        //             " {}{} possible fix.",
-        //             " ".repeat(new.start),
-        //             "^".repeat(new.snippet.len())
-        //         ),
-        //         Color::Green,
-        //     );
-        //     println!()
-        // }
-
-        if let Some(first_line) = lines.get(self.line + 1) {
-            print_str_colored(b, &format!(" {:02} | ", self.line + 2), Color::Blue);
-            highlight(
-                b,
-                &tokens
-                    .iter()
-                    .filter(|t| t.line == self.line + 1)
-                    .collect::<Vec<&Token>>(),
-                first_line,
-            );
+        for (i, line) in lines.iter().enumerate().take(end_line + 1).skip(start_line) {
+            print_str_colored(b, &format!(" {:02} | ", i + 1), Color::Blue);
+            let line_tokens = tokens.iter().filter(|t| t.line == i).collect::<Vec<_>>();
+            highlight(b, &line_tokens, line);
             b.write_char('\n');
-        }
 
-        if let Some(sec_line) = lines.get(self.line + 2) {
-            print_str_colored(b, &format!(" {:02} | ", self.line + 3), Color::Blue);
-            highlight(
-                b,
-                &tokens
-                    .iter()
-                    .filter(|t| t.line == self.line + 2)
-                    .collect::<Vec<&Token>>(),
-                sec_line,
-            );
-            b.write_char('\n');
+            if i == self.line {
+                let repeat = if self.end > self.start {
+                    self.end - self.start
+                } else {
+                    1
+                };
+
+                print_str_colored(b, "    | ", Color::Blue);
+                print_str_colored(
+                    b,
+                    &format!(
+                        "{}{} error occurs here.\n",
+                        " ".repeat(self.start),
+                        "~".repeat(repeat)
+                    ),
+                    Color::Red,
+                );
+            }
         }
 
         print_str_colored(b, "    |\n", Color::Blue);
@@ -234,17 +165,16 @@ impl Error {
         }
         b.write_char('\n');
 
-        print_str_colored(b, "  * ", Color::Blue);
+        if self.doc_url.is_some() {
+            print_str_colored(b, "    ~ docs: ", Color::Blue);
+            b.write_str(self.doc_url.unwrap());
+            b.write_char('\n');
+        }
+
+        print_str_colored(b, " * ", Color::Blue);
         print_str_colored(b, self.rule.name(), Color::Blue);
         b.write_str(": ");
         b.write_str(self.rule.description());
         b.write_char('\n');
-
-        if self.doc_url.is_some() {
-            print_str_colored(b, " docs", Color::Blue);
-            b.write_str(": ");
-            b.write_str(self.doc_url.unwrap());
-            b.write_char('\n');
-        }
     }
 }

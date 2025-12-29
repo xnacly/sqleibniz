@@ -28,7 +28,7 @@ macro_rules! test_group_pass_assert {
                         .collect::<Vec<_>>(),
                     )
                 .unwrap();
-                assert_eq!(serialized_expected, serialized_ast);
+                pretty_assertions::assert_eq!(serialized_expected, serialized_ast);
             }
         )*
         }
@@ -297,302 +297,238 @@ mod should_pass {
         ]
     }
 
-    // test_group_pass_assert! {
-    //     column_constraint,
+    test_group_pass_assert! {
+        // TODO: somehow there is no ADD column in this test:
+        foreign_key_clause_ast_bug_exception,
 
-    //     primary_key_no_order_no_conflict_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        references_on_delete_set_null:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table ON DELETE SET NULL;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::ForeignKey(ForeignKeyClause {
+                    foreign_table: "foreign_table".into(),
+                    references_columns: vec![],
+                    on_delete: Some(ForeignKeyAction::SetNull),
+                    on_update: None,
+                    match_type: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                })],
+            )),
+            None,
+        )]
+    }
 
-    //     primary_key_asc_no_conflict_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         ASC;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+    test_group_pass_assert! {
+        column_constraint_primary_key,
 
-    //     primary_key_desc_no_conflict_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        primary_key_no_order:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT PRIMARY KEY;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::PrimaryKey {
+                    asc_desc: None,
+                    on_conflict: None,
+                    autoincrement: false,
+                }],
+            )),
+            None,
+        )],
 
-    //     primary_key_asc_conflict_rollback_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC
-    //         ON CONFLICT ROLLBACK;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        primary_key_asc:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT PRIMARY KEY ASC;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::PrimaryKey {
+                    asc_desc: Some(Keyword::ASC),
+                    on_conflict: None,
+                    autoincrement: false,
+                }],
+            )),
+            None,
+        )],
 
-    //     primary_key_asc_conflict_abort_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC
-    //         ON CONFLICT ABORT;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        primary_key_desc_conflict_replace_autoincrement:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT PRIMARY KEY DESC ON CONFLICT REPLACE AUTOINCREMENT;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::PrimaryKey {
+                    asc_desc: Some(Keyword::DESC),
+                    on_conflict: Some(Keyword::REPLACE),
+                    autoincrement: true,
+                }],
+            )),
+            None,
+        )]
+    }
 
-    //     primary_key_asc_conflict_fail_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC
-    //         ON CONFLICT FAIL;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+    test_group_pass_assert! {
+        column_constraint_not_null_unique,
 
-    //     primary_key_asc_conflict_ignore_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC
-    //         ON CONFLICT IGNORE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        not_null_no_conflict:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT NOT NULL;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::NotNull { on_conflict: None }],
+            )),
+            None,
+        )],
 
-    //     primary_key_asc_conflict_replace_no_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC
-    //         ON CONFLICT REPLACE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        unique_conflict_replace:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT UNIQUE ON CONFLICT REPLACE;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Unique {
+                    on_conflict: Some(Keyword::REPLACE),
+                }],
+            )),
+            None,
+        )]
+    }
 
-    //     primary_key_asc_conflict_replace_autoincrement:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         PRIMARY KEY
-    //         DESC
-    //         ON CONFLICT REPLACE
-    //         AUTOINCREMENT;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+    test_group_pass_assert! {
+        column_constraint_misc,
 
-    //     not_null_no_conflict:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         NOT NULL;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        check_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK ('literal string lol');"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Check(
+                    Expr::new(
+                        Some(Token::new(Type::String("literal string lol".into()))),
+                        None, None, None, None
+                    )
+                )],
+            )),
+            None,
+        )],
 
-    //     // i am not retesting the conflicts here, because i tested all cases above
-    //     not_null_conflict:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         NOT NULL ON CONFLICT REPLACE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        default_literal:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT DEFAULT 'literal';"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Default {
+                    expr: None,
+                    literal: Some(Literal {
+                        t: Token::new(Type::String("literal".into()))
+                    }),
+                }],
+            )),
+            None,
+        )],
 
-    //     unique_no_conflict:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         UNIQUE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        collate:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT COLLATE collation_name;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Collate("collation_name".into())],
+            )),
+            None,
+        )]
+    }
 
-    //     unique_conflict:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         UNIQUE ON CONFLICT REPLACE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+    test_group_pass_assert! {
+        column_constraint_generated,
 
-    //     check:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         CHECK ('literal string lol');
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        generated_stored:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT GENERATED ALWAYS AS ('literal') STORED;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Generated {
+                    expr: Expr::new(
+                        Some(Token::new(Type::String("literal".into()))),
+                        None, None, None, None
+                    ),
+                    stored_virtual: Some(Keyword::STORED),
+                }],
+            )),
+            None,
+        )],
 
-    //     default_expr:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         DEFAULT ('default string');
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+        as_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT AS ('literal');"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::As{
+                    stored_virtual: None,
+                    expr: Expr::new(
+                        Some(Token::new(Type::String("literal".into()))),
+                        None, None, None, None
+                    )
+                }],
+            )),
+            None,
+        )]
+    }
 
-    //     default_literal:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         DEFAULT 'literal';
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
+    test_group_pass_assert! {
+        foreign_key_clause,
 
-    //     default_signed_number:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         DEFAULT 25;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     collate:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         COLLATE collation_name;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     generated_always_as_expr_stored:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         GENERATED ALWAYS AS ('literal') STORED;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     generated_always_as_expr_virtual:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         GENERATED ALWAYS AS ('literal') VIRTUAL;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     generated_always_as_expr_no_postfix:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         GENERATED ALWAYS AS ('literal');
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     as_expr_no_postfix:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         AS ('literal');
-    //     "=vec![Type::Keyword(Keyword::ALTER)]
-    // }
-
-    // test_group_pass_assert! {
-    //     foreign_key_clause,
-
-    //     references_with_optional_column_names:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table (colum1, colum2);
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_with_optional_column_name:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table (colum1);
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_delete_set_null:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON DELETE SET NULL;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_delete_set_default:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON DELETE SET DEFAULT;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_delete_cascade:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON DELETE CASCADE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_delete_restrict:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON DELETE RESTRICT;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_delete_no_action:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON DELETE NO ACTION;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_update_set_null:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON UPDATE SET NULL;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_update_set_default:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON UPDATE SET DEFAULT;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_update_cascade:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON UPDATE CASCADE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_update_restrict:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON UPDATE RESTRICT;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_on_update_no_action:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table ON UPDATE NO ACTION;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_match_name:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table MATCH name;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_deferrable:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table DEFERRABLE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_not_deferrable:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table NOT DEFERRABLE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_not_deferrable_initially_deferred:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table NOT DEFERRABLE INITIALLY DEFERRED;
-    //     "=vec![Type::Keyword(Keyword::ALTER)],
-
-    //     references_not_deferrable_initially_immediate:r"
-    //         ALTER TABLE schema.table_name
-    //         ADD COLUMN column_name TEXT
-    //         -- constraint:
-    //         REFERENCES foreign_table NOT DEFERRABLE INITIALLY IMMEDIATE;
-    //     "=vec![Type::Keyword(Keyword::ALTER)]
-    // }
+        references_on_delete_set_null:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table ON DELETE SET NULL;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::ForeignKey(ForeignKeyClause {
+                    foreign_table: "foreign_table".into(),
+                    references_columns: vec![],
+                    on_delete: Some(ForeignKeyAction::SetNull),
+                    on_update: None,
+                    match_type: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                })],
+            )),
+            None,
+        )]
+    }
 }
 
 #[allow(unused_macros)]
@@ -621,134 +557,26 @@ macro_rules! test_group_fail {
 #[cfg(test)]
 mod should_fail {
     test_group_fail! {
-        edge_cases,
+        negative_tests,
         eof_semi: ";",
-        eof_hit_string: "'str'",
-        eof_hit_number: "0x0",
-        eof_hit_blob: "x''",
-        eof_hit_null: "NULL",
-        eof_hit_boolean: "true",
-        eof_hit_cur_time: "CURRENT_TIME",
-        eof_hit_cur_date: "CURRENT_DATE",
-        eof_hit_cur_timestamp: "CURRENT_TIMESTAMP"
-    }
-
-    test_group_fail! {
-        sql_stmt_prefix,
-        explain: r#"EXPLAIN;"#,
-        explain_query_plan: r#"EXPLAIN QUERY PLAN;"#
-    }
-
-    test_group_fail! {
-        sql_vacuum,
-        vacuum_no_semicolon: r#"VACUUM"#,
-        vacuum_invalid_schema: r#"VACUUM 1;"#,
-        vacuum_invalid_filename: r#"VACUUM INTO 5;"#,
-        vacuum_invalid_combined: r#"VACUUM 5 INTO 5;"#
-    }
-
-    test_group_fail! {
-        sql_begin,
-        begin_no_semicolon: r#"BEGIN"#,
-        begin_transaction_no_semicolon: r#"BEGIN TRANSACTION"#,
-        begin_deferred_no_semicolon: r#"BEGIN DEFERRED"#,
-        begin_immediate_no_semicolon: r#"BEGIN IMMEDIATE"#,
-        begin_exclusive_no_semicolon: r#"BEGIN EXCLUSIVE"#,
-
-        begin_transaction_with_literal: r#"BEGIN TRANSACTION 25;"#,
-        begin_transaction_with_other_keyword: r#"BEGIN TRANSACTION AS;"#,
-        begin_too_many_modifiers: r#"BEGIN DEFERRED IMMEDIATE EXCLUSIVE EXCLUSIVE;"#
-
-    }
-
-    test_group_fail! {
-        commit_stmt,
-        commit_no_semicolon:            r"COMMIT",
-        end_no_semicolon:               r"END",
-        commit_transaction_no_semicolon:r"COMMIT TRANSACTION",
-        end_transaction_no_semicolon:   r"END TRANSACTION",
-
-        commit_with_literal:            r"COMMIT 25;",
-        end_with_literal:               r"END 12;",
-        commit_transaction_with_literal:r"COMMIT TRANSACTION x'81938912';",
-        end_transaction_with_literal:   r"END TRANSACTION 'kadl';"
-    }
-
-    test_group_fail! {
-        rollback_stmt,
-
-        rollback_no_semicolon:r"ROLLBACK",
-        rollback_to_save_point_no_semicolon:r"ROLLBACK TO save_point",
-        rollback_to_savepoint_save_point_no_semicolon:r"ROLLBACK TO SAVEPOINT save_point",
-        rollback_transaction_no_semicolon:r"ROLLBACK TRANSACTION",
-        rollback_transaction_to_save_point_no_semicolon:r"ROLLBACK TRANSACTION TO save_point",
-        rollback_transaction_to_savepoint_save_point_no_semicolon:r"ROLLBACK TRANSACTION TO SAVEPOINT save_point",
-
-        rollback_transaction_to_literal_save_point:r"ROLLBACK TRANSACTION TO SAVEPOINT 'hello';"
-    }
-
-    test_group_fail! {
-        detach_stmt,
-
-        detach_schema_name_no_semicolon:r"DETACH schema_name",
-        detach_database_schema_name_no_semicolon:r"DETACH DATABASE schema_name",
-
-        detach_schema_no_name:r"DETACH;",
-        detach_database_no_schema_name:r"DETACH DATABASE;",
-        detach_schema_literal_instead_of_name:r"DETACH 'this string should not be here';"
-    }
-
-    test_group_fail! {
-        drop_stmt,
-
-        drop_index_index_name_no_semicolon:r"DROP INDEX index_name",
-        drop_index_if_exists_schema_name_index_name_no_semicolon:r"DROP INDEX IF EXISTS schema_name.index_name",
-        drop_table_table_name_no_semicolon:r"DROP TABLE table_name",
-        drop_table_if_exists_schema_name_table_name_no_semicolon:r"DROP TABLE IF EXISTS schema_name.table_name",
-        drop_trigger_trigger_name_no_semicolon:r"DROP TRIGGER trigger_name",
-        drop_trigger_if_exists_schema_name_trigger_name_no_semicolon:r"DROP TRIGGER IF EXISTS schema_name.trigger_name",
-        drop_view_view_name_no_semicolon:r"DROP VIEW view_name",
-        drop_view_if_exists_schema_name_view_name_no_semicolon:r"DROP VIEW IF EXISTS schema_name.view_name",
-
-        drop_index_no_index_name:r"DROP INDEX;",
-        drop_table_no_table_name:r"DROP TABLE;",
-        drop_trigger_no_trigger_name:r"DROP TRIGGER;",
-        drop_view_no_view_name:r"DROP VIEW;"
-    }
-
-    test_group_fail! {
-        savepoint_stmt,
-
-        savepoint_savepoint_name_no_semicolon:r"SAVEPOINT savepoint_name",
-
-        savepoint_no_savepoint_name:r"SAVEPOINT;"
-    }
-
-    test_group_fail! {
-        release_stmt,
-
-        release_savepoint_savepoint_name_no_semicolon:r"RELEASE SAVEPOINT savepoint_name",
-        release_savepoint_name_no_semicolon:r"RELEASE savepoint_name",
-
-        release_savepoint_no_savepoint_name:r"RELEASE SAVEPOINT;",
-        release_savepoint_no_name:r"RELEASE;"
-    }
-
-    test_group_fail! {
-        reindex_stmt,
-
-        reindex_no_semicolon:r"REINDEX",
-        reindex_collation_name_no_semicolon:r"REINDEX collation_name",
-        reindex_schema_name_table_name_no_semicolon:r"REINDEX schema_name.table_name",
-
-        reindex_schema_name_no_table_or_index:r"REINDEX schema_name.;",
-        reindex_collation_name_literal:r"REINDEX 25;"
-    }
-
-    test_group_fail! {
-        alter_stmt,
-
-        alter_no_table_after_alter:r"ALTER;",
-        alter_no_tablename:r"ALTER TABLE;"
+        eof_literal: "'str'",
+        alter_no_table: "ALTER;",
+        alter_no_name: "ALTER TABLE;",
+        commit_no_semicolon: "COMMIT",
+        end_no_semicolon: "END",
+        rollback_no_semicolon: "ROLLBACK",
+        rollback_to_savepoint_no_name: "ROLLBACK TO SAVEPOINT",
+        begin_no_semicolon: "BEGIN",
+        begin_invalid_modifiers: "BEGIN DEFERRED IMMEDIATE EXCLUSIVE EXCLUSIVE;",
+        detach_no_name: "DETACH;",
+        detach_invalid_literal: "DETACH 'bad';",
+        drop_no_object: "DROP TABLE;",
+        drop_invalid_object: "DROP INDEX 5;",
+        savepoint_no_name: "SAVEPOINT;",
+        release_no_name: "RELEASE;",
+        reindex_no_name: "REINDEX",
+        reindex_invalid_literal: "REINDEX 25;",
+        vacuum_no_semicolon: "VACUUM",
+        vacuum_invalid_combined: "VACUUM 5 INTO 5;"
     }
 }

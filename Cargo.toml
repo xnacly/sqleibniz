@@ -20,3 +20,6 @@ mlua = {version = "0.10.2", features = ["lua54", "vendored"]}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.135"
 toml = "0.8.19"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

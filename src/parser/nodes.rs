@@ -218,6 +218,7 @@ SQLite supports a limited subset of ALTER TABLE. The ALTER TABLE command in SQLi
 );
 
 #[derive(Debug, serde::Serialize)]
+/// https://www.sqlite.org/syntax/foreign-key-clause.html ON [DELETE|UPDATE] ForeignKeyAction
 pub enum ForeignKeyAction {
     Cascade,
     Restrict,
@@ -274,7 +275,11 @@ pub enum ColumnConstraint {
         /// either STORED or VIRTUAL
         stored_virtual: Option<Keyword>,
     },
-    As(Expr),
+    As {
+        expr: Expr,
+        /// either STORED or VIRTUAL
+        stored_virtual: Option<Keyword>,
+    },
     ForeignKey(ForeignKeyClause),
 }
 

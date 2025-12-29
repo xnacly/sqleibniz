@@ -39,7 +39,7 @@ impl FieldSerializable for ColumnConstraint {
             ColumnConstraint::Default { .. } => "default",
             ColumnConstraint::Collate(_) => "collate",
             ColumnConstraint::Generated { .. } => "generated",
-            ColumnConstraint::As(_) => "as",
+            ColumnConstraint::As { .. } => "as",
             ColumnConstraint::ForeignKey(_) => "foreign_key",
         };
         let inner = match self {
@@ -67,7 +67,7 @@ impl FieldSerializable for ColumnConstraint {
                 })
             }
             ColumnConstraint::Collate(str) => serde_json::json!(str),
-            ColumnConstraint::Check(expr) | ColumnConstraint::As(expr) => serde_json::json!({
+            ColumnConstraint::Check(expr) => serde_json::json!({
                 "expr": expr.as_serializable(),
             }),
             ColumnConstraint::Default { expr, literal } => {
@@ -83,6 +83,10 @@ impl FieldSerializable for ColumnConstraint {
                 })
             }
             ColumnConstraint::Generated {
+                expr,
+                stored_virtual,
+            }
+            | ColumnConstraint::As {
                 expr,
                 stored_virtual,
             } => serde_json::json!({

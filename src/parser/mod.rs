@@ -5,7 +5,9 @@ use proc::trace;
 
 use crate::{
     error::{Error, ImprovedLine},
-    parser::nodes::{ColumnConstraint, ForeignKeyAction, ForeignKeyClause, ForeignKeyMatch},
+    parser::nodes::{
+        ColumnConstraint, ForeignKeyAction, ForeignKeyClause, ForeignKeyMatch, Pragma,
+    },
     types::{Keyword, Token, Type, rules::Rule, storage::SqliteStorageClass},
 };
 
@@ -257,6 +259,7 @@ impl<'a> Parser<'a> {
     fn sql_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         match self.cur().ttype {
             // TODO: add new statement starts here
+            Type::Keyword(Keyword::PRAGMA) => self.pragma_stmt(),
             Type::Keyword(Keyword::ALTER) => self.alter_stmt(),
             Type::Keyword(Keyword::ATTACH) => self.attach_stmt(),
             Type::Keyword(Keyword::REINDEX) => self.reindex_stmt(),
@@ -367,8 +370,85 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_createindex.html
     #[cfg_attr(feature = "trace", trace)]
     fn create_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        println!("Parser::create_stmt");
-        None
+        todo!("Parser::create_stmt");
+    }
+
+    /// https://www.sqlite.org/pragma.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn pragma_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let t = self.cur().clone();
+
+        // skip PRAGMA
+        self.advance();
+
+        // PRAGMA needs a target name
+        let Some(schema_and_pragma) = self.schema_table_container(Some("pragma")) else {
+            return None;
+        };
+
+        let pragma = if self.is(Type::Semicolon) {
+            Pragma {
+                t,
+                name: schema_and_pragma,
+                invocation: nodes::PragmaInvocation::Query,
+            }
+        } else if self.is(Type::Equal) {
+            self.advance();
+            match self.cur().ttype {
+                Type::String(_) | Type::Number(_) | Type::Ident(_) | Type::Keyword(_) => {}
+                _ => {
+                    let cur = self.cur().clone();
+                    self.push_err("Bad pragma value", &format!("A pragmas assignment value has to be either String, Number, Ident or a Keyword, got {:?} instead", cur.ttype), &cur, Rule::Syntax,);
+                    self.advance();
+                }
+            }
+            let p = Pragma {
+                t,
+                name: schema_and_pragma,
+                invocation: nodes::PragmaInvocation::Assign {
+                    value: self.cur().clone(),
+                },
+            };
+            self.advance();
+            p
+        } else if self.is(Type::BraceLeft) {
+            self.advance();
+            match self.cur().ttype {
+                Type::String(_) | Type::Number(_) | Type::Ident(_) | Type::Keyword(_) => {}
+                _ => {
+                    let cur = self.cur().clone();
+                    self.push_err("Bad pragma value", &format!("A pragmas call value has to be either String, Number, Ident or a Keyword, got {:?} instead", cur.ttype), &cur, Rule::Syntax,);
+                    self.advance();
+                }
+            }
+            let p = Pragma {
+                t,
+                name: schema_and_pragma,
+                invocation: nodes::PragmaInvocation::Call {
+                    value: self.cur().clone(),
+                },
+            };
+            self.advance();
+            self.consume(Type::BraceRight);
+            p
+        } else {
+            let cur = self.cur().clone();
+            self.push_err(
+                "Bad pragma value",
+                &format!(
+                    "A pragmas rhs value has to be either an assignment via '=', a call via '(<arg>)' or simply be a query, got {:?} instead",
+                    cur.ttype
+                ),
+                &cur,
+                Rule::Syntax,
+            );
+            self.advance();
+            return None;
+        };
+
+        self.expect_end("https://www.sqlite.org/pragma.html");
+
+        some_box!(pragma)
     }
 
     /// https://www.sqlite.org/lang_altertable.html
@@ -387,7 +467,7 @@ impl<'a> Parser<'a> {
         self.advance();
         self.consume(Type::Keyword(Keyword::TABLE));
 
-        a.target = self.schema_table_container()?;
+        a.target = self.schema_table_container(None)?;
 
         match self.cur().ttype {
             Type::Keyword(Keyword::RENAME) => {
@@ -468,7 +548,7 @@ impl<'a> Parser<'a> {
             return some_box!(r);
         }
 
-        r.target = self.schema_table_container();
+        r.target = self.schema_table_container(None);
 
         self.expect_end("https://www.sqlite.org/syntax/reindex-stmt.html");
 
@@ -591,7 +671,7 @@ impl<'a> Parser<'a> {
             false
         };
 
-        let argument = self.schema_table_container()?;
+        let argument = self.schema_table_container(None)?;
 
         some_box!(nodes::Drop {
             t,
@@ -1074,7 +1154,10 @@ impl<'a> Parser<'a> {
 
     /// parses schema_name.table_name and table_name
     #[cfg_attr(feature = "trace", trace)]
-    fn schema_table_container(&mut self) -> Option<SchemaTableContainer> {
+    fn schema_table_container(
+        &mut self,
+        target_name: Option<&str>,
+    ) -> Option<SchemaTableContainer> {
         match self.cur().ttype.clone() {
             Type::Ident(schema) if self.next_is(Type::Dot) => {
                 // skip schema_name
@@ -1096,21 +1179,25 @@ impl<'a> Parser<'a> {
                     let cur = self.cur().clone();
                     self.errors.push(match cur.ttype {
                         Type::Keyword(keyword) => {
+                let target_name = target_name.unwrap_or_else(|| "table");
                             let as_str: &str = keyword.into();
                             self.err(
-                            "Malformed table name",
-                            &format!("`{as_str}` is a keyword, if you want to use it as a table or column name, quote it: '{as_str}'"),
+                            &format!("Malformed {target_name} name"),
+                            &format!("`{as_str}` is a keyword, if you want to use it as a {target_name} or column name, quote it: '{as_str}'"),
                             &cur, Rule::Syntax)
                         }
-                        _ => self.err(
-                            "Malformed table name",
-                            &format!(
-                                "expected a table name after <schema_name>. - got {:?}",
-                                cur.ttype
-                            ),
-                            &cur,
-                            Rule::Syntax,
-                        ),
+                        _ => {
+                let target_name = target_name.unwrap_or_else(|| "table");
+                            self.err(
+                                                    &format!("Malformed {target_name} name"),
+                                                    &format!(
+                                                        "expected a {target_name} name after <schema_name>. - got {:?}",
+                                                        cur.ttype
+                                                    ),
+                                                    &cur,
+                                                    Rule::Syntax,
+                                                )
+                        },
                     });
 
                     // skip wrong token, should I skip to the next statement via
@@ -1126,11 +1213,12 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let cur = self.cur().clone();
+                let target_name = target_name.unwrap_or_else(|| "table");
                 self.push_err(
-                    "Malformed table name",
+                    &format!("Malformed {} name", target_name),
                     &format!(
-                        "expected either schema_name.table_name or table_name, got {:?}",
-                        cur.ttype
+                        "expected either schema_name.{} or {}, got {:?}",
+                        target_name, target_name, cur.ttype
                     ),
                     &cur,
                     Rule::Syntax,

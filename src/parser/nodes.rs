@@ -1,38 +1,6 @@
 use crate::parser::debug::FieldSerializable;
-use crate::types::{Keyword, Token, Type, storage::SqliteStorageClass};
+use crate::types::{Keyword, Token, storage::SqliteStorageClass};
 
-/// Generates a Node from the given input:
-///
-///```
-///node!(
-///    Literal,
-///    "holds all literal types, such as strings, numbers, etc.",
-///);
-///#[derive(Debug)]
-///#[doc = "holds all literal types, such as strings, numbers, etc."]
-///pub struct Literal {
-///    #[doc = r" predefined for all structures defined with the node! macro, holds the token of the ast node"]
-///    pub t:Token,pub children:Option<Vec<Box<dyn Node>>>,
-///}
-///impl Node for Literal {
-///    fn token(&self) ->  &Token {
-///        &self.t
-///    }
-///    #[cfg(feature = "trace")]
-///    fn display(&self,indent:usize){
-///        print!("{}- {}"," ".repeat(indent),self.name());
-///        println!();
-///        if let Some(children) =  &self.children {
-///            for child in children {
-///                child.display(indent+1)
-///            }
-///        }
-///    }
-///    fn name(&self) ->  &str {
-///        stringify!(Literal)
-///    }
-///}
-///```
 macro_rules! node {
     ($node_name:ident,$documentation:literal,$($field_name:ident:$field_type:ty),*) => {
         #[derive(Debug)]
@@ -79,12 +47,12 @@ macro_rules! node {
             }
         }
 
+        #[cfg(test)]
         impl $node_name {
-            // #[cfg(test)]
             pub fn new($($field_name: $field_type,)*) -> Self {
                 Self {
                     // Type::InstructionExpect is always used in tests
-                    t: Token::new(Type::InstructionExpect),
+                    t: Token::new(crate::types::Type::InstructionExpect),
                     $($field_name,)*
                 }
             }
@@ -116,7 +84,9 @@ node!(
     Literal,
     r"Literal value, see: https://www.sqlite.org/lang_expr.html#literal_values_constants_
 
-A literal value represents a constant. Literal values may be integers, floating point numbers, strings, BLOBs, or NULLs.",
+A literal value represents a constant. Literal values may be integers, floating point numbers, strings, BLOBs, or NULLs.
+Which kind a literal is, is encoded in the Nodes token.
+",
 );
 
 node!(
@@ -156,9 +126,7 @@ node!(
     Explain,
    r"Explain stmt, see: https://www.sqlite.org/lang_explain.html
 
-An SQL statement can be preceded by the keyword 'EXPLAIN' or by the phrase 'EXPLAIN QUERY PLAN'.
-Either modification causes the SQL statement to behave as a query and to return information about
-how the SQL statement would have operated if the EXPLAIN keyword or phrase had been omitted.
+An SQL statement can be preceded by the keyword 'EXPLAIN' or by the phrase 'EXPLAIN QUERY PLAN'. Either modification causes the SQL statement to behave as a query and to return information about how the SQL statement would have operated if the EXPLAIN keyword or phrase had been omitted.
 
 In depth guide for `EXPLAIN QUERY PLAN`: https://www.sqlite.org/eqp.html
 
@@ -196,12 +164,9 @@ node!(
     Begin,
     r"Begin stmt, see: https://www.sqlite.org/lang_transaction.html
 
-Transactions can be started manually using the BEGIN command. Such transactions usually persist
-until the next COMMIT or ROLLBACK command. But a transaction will also ROLLBACK if the database is
-closed or if an error occurs and the ROLLBACK conflict resolution algorithm is specified
+Transactions can be started manually using the BEGIN command. Such transactions usually persist until the next COMMIT or ROLLBACK command. But a transaction will also ROLLBACK if the database is closed or if an error occurs and the ROLLBACK conflict resolution algorithm is specified
 
-Transactions can be DEFERRED, IMMEDIATE, or EXCLUSIVE. The default transaction behavior is
-DEFERRED. 
+Transactions can be DEFERRED, IMMEDIATE, or EXCLUSIVE. The default transaction behavior is DEFERRED. 
 
 # Examples
 
@@ -223,8 +188,7 @@ node!(
     Commit,
     r"Commit stmt, see: https://www.sqlite.org/lang_transaction.html
 
-END TRANSACTION is an alias for COMMIT. Transactions created using BEGIN...COMMIT do not nest. For
-nested transactions, use the SAVEPOINT and RELEASE commands.
+END TRANSACTION is an alias for COMMIT. Transactions created using BEGIN...COMMIT do not nest. For nested transactions, use the SAVEPOINT and RELEASE commands.
 
 # Examples
 
@@ -241,11 +205,7 @@ node!(
     Rollback,
     r"Rollback stmt, see:  https://www.sqlite.org/lang_savepoint.html
 
-The ROLLBACK TO command reverts the state of the database back to what it was just after the
-corresponding SAVEPOINT. Note that unlike that plain ROLLBACK command (without the TO keyword) the
-ROLLBACK TO command does not cancel the transaction. Instead of cancelling the transaction, the
-ROLLBACK TO command restarts the transaction again at the beginning. All intervening SAVEPOINTs are
-canceled, however.
+The ROLLBACK TO command reverts the state of the database back to what it was just after the corresponding SAVEPOINT. Note that unlike that plain ROLLBACK command (without the TO keyword) the ROLLBACK TO command does not cancel the transaction. Instead of cancelling the transaction, the ROLLBACK TO command restarts the transaction again at the beginning. All intervening SAVEPOINTs are canceled, however.
 
 # Examples
 
@@ -265,10 +225,7 @@ node!(
     Detach,
     r"Detach stmt, see: https://www.sqlite.org/lang_detach.html
 
-This statement detaches an additional database connection previously attached using the ATTACH
-statement. When not in shared cache mode, it is possible to have the same database file attached
-multiple times using different names, and detaching one connection to a file will leave the others
-intact.
+This statement detaches an additional database connection previously attached using the ATTACH statement. When not in shared cache mode, it is possible to have the same database file attached multiple times using different names, and detaching one connection to a file will leave the others intact.
 
 # Examples
 
@@ -284,13 +241,7 @@ node!(
     Analyze,
     r"Analyze stmt, see: https://www.sqlite.org/lang_analyze.html
 
-The ANALYZE command gathers statistics about tables and indices and stores the collected
-information in internal tables of the database where the query optimizer can access the
-information and use it to help make better query planning choices. If no arguments are given, the
-main database and all attached databases are analyzed. If a schema name is given as the argument,
-then all tables and indices in that one database are analyzed. If the argument is a table name,
-then only that table and the indices associated with that table are analyzed. If the argument is
-an index name, then only that one index is analyzed.
+The ANALYZE command gathers statistics about tables and indices and stores the collected information in internal tables of the database where the query optimizer can access the information and use it to help make better query planning choices. If no arguments are given, the main database and all attached databases are analyzed. If a schema name is given as the argument, then all tables and indices in that one database are analyzed. If the argument is a table name, then only that table and the indices associated with that table are analyzed. If the argument is an index name, then only that one index is analyzed.
 
 # Examples
 
@@ -319,9 +270,7 @@ node!(
 
 ## DROP INDEX
 
-The DROP INDEX statement removes an index added with the CREATE INDEX statement. The index is
-completely removed from the disk. The only way to recover the index is to reenter the appropriate
-CREATE INDEX command, see https://www.sqlite.org/lang_dropindex.html.
+The DROP INDEX statement removes an index added with the CREATE INDEX statement. The index is completely removed from the disk. The only way to recover the index is to reenter the appropriate CREATE INDEX command, see https://www.sqlite.org/lang_dropindex.html.
 
 # Examples
 
@@ -332,10 +281,7 @@ DROP INDEX IF EXISTS schema_name.index_name;
 
 ## DROP TABLE
 
-The DROP TABLE statement removes a table added with the CREATE TABLE statement. The name specified
-is the table name. The dropped table is completely removed from the database schema and the disk
-file. The table can not be recovered. All indices and triggers associated with the table are also
-deleted, see: https://www.sqlite.org/lang_droptable.html.
+The DROP TABLE statement removes a table added with the CREATE TABLE statement. The name specified is the table name. The dropped table is completely removed from the database schema and the disk file. The table can not be recovered. All indices and triggers associated with the table are also deleted, see: https://www.sqlite.org/lang_droptable.html.
 
 # Examples
 
@@ -346,9 +292,7 @@ DROP TABLE IF EXISTS schema_name.table_name;
                     
 ## DROP TRIGGER
 
-The DROP TRIGGER statement removes a trigger created by the CREATE TRIGGER statement. Once removed, the trigger definition 
-is no longer present in the sqlite_schema (or sqlite_temp_schema) table and is not fired by any subsequent
-INSERT, UPDATE or DELETE statements, see: https://www.sqlite.org/lang_droptrigger.html.
+The DROP TRIGGER statement removes a trigger created by the CREATE TRIGGER statement. Once removed, the trigger definition is no longer present in the sqlite_schema (or sqlite_temp_schema) table and is not fired by any subsequent INSERT, UPDATE or DELETE statements, see: https://www.sqlite.org/lang_droptrigger.html.
 
 # Examples
 
@@ -359,10 +303,7 @@ DROP TRIGGER IF EXISTS schema_name.trigger_name;
                                                 
 ## DROP VIEW
 
-The DROP VIEW statement removes a view created by the CREATE VIEW statement. 
-The view definition is removed from the database schema,
-but no actual data in the underlying base tables is modified,
-see: https://www.sqlite.org/lang_dropview.html.
+The DROP VIEW statement removes a view created by the CREATE VIEW statement. The view definition is removed from the database schema, but no actual data in the underlying base tables is modified, see: https://www.sqlite.org/lang_dropview.html.
 
 # Examples
 
@@ -380,8 +321,7 @@ node!(
     Savepoint,
     r"Savepoint stmt, see: https://www.sqlite.org/lang_savepoint.html
 
-SAVEPOINTs are a method of creating transactions, similar to BEGIN and COMMIT, except that the
-SAVEPOINT and RELEASE commands are named and may be nested.
+SAVEPOINTs are a method of creating transactions, similar to BEGIN and COMMIT, except that the SAVEPOINT and RELEASE commands are named and may be nested.
 
 # Examples
 
@@ -396,9 +336,7 @@ node!(
     Release,
     r"Release stmt, see: https://www.sqlite.org/lang_savepoint.html
 
-The RELEASE command is like a COMMIT for a SAVEPOINT. The RELEASE command causes all savepoints
-back to and including the most recent savepoint with a matching name to be removed from the
-transaction stack.
+The RELEASE command is like a COMMIT for a SAVEPOINT. The RELEASE command causes all savepoints back to and including the most recent savepoint with a matching name to be removed from the transaction stack.
 
 # Examples
 
@@ -414,8 +352,7 @@ node!(
     Attach,
     "Attach stmt, see: https://www.sqlite.org/lang_attach.html
 
-The ATTACH DATABASE statement adds another database file to the current database connection.
-Database files that were previously attached can be removed using the DETACH DATABASE command. 
+The ATTACH DATABASE statement adds another database file to the current database connection. Database files that were previously attached can be removed using the DETACH DATABASE command. 
 
 # Examples
 
@@ -432,9 +369,7 @@ node!(
     Reindex,
     r"Reindex stmt, see: https://www.sqlite.org/lang_reindex.html
 
-The REINDEX command is used to delete and recreate indices from scratch. This is useful when the
-definition of a collation sequence has changed, or when there are indexes on expressions involving
-a function whose definition has changed.
+The REINDEX command is used to delete and recreate indices from scratch. This is useful when the definition of a collation sequence has changed, or when there are indexes on expressions involving a function whose definition has changed.
 
 # Examples
 
@@ -451,10 +386,7 @@ node!(
     Alter,
     r"Alter stmt, see: https://www.sqlite.org/lang_altertable.html
 
-SQLite supports a limited subset of ALTER TABLE:
-The ALTER TABLE command in SQLite allows these alterations of an existing table: a table can be
-renamed, a column can be renamed, a column can be added to a table or a column can be dropped
-from the table.
+SQLite supports a limited subset of ALTER TABLE: The ALTER TABLE command in SQLite allows these alterations of an existing table: a table can be renamed, a column can be renamed, a column can be added to a table or a column can be dropped from the table.
 
 # Examples
 
@@ -551,4 +483,32 @@ node!(
     // equivalent to type_name: https://www.sqlite.org/syntax/type-name.html
     type_name: Option<SqliteStorageClass>,
     constraints: Vec<ColumnConstraint>
+);
+
+#[derive(Debug, serde::Serialize)]
+pub enum PragmaInvocation {
+    Query,
+    Assign { value: Token },
+    Call { value: Token },
+}
+
+node!(
+    Pragma,
+    r"PRAGMA Statements, see: https://www.sqlite.org/pragma.html
+
+The PRAGMA statement is an SQL extension specific to SQLite and used to modify the operation of the SQLite library or to query the SQLite library for internal (non-table) data
+
+Some pragmas are deprecated, sqleibniz will omit errors for: deprecated, unknown and wrongly used pragmas.
+
+# Examples
+
+```sql
+PRAGMA schema.cache_size = 5; -- 5 pages
+PRAGMA automatic_index = 1;
+PRAGMA database_list;
+```
+",
+    // since pragma names can be schema.pragma_name, we encode it like this in the ast
+    name: SchemaTableContainer,
+    invocation: PragmaInvocation
 );

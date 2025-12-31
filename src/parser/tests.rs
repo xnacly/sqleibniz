@@ -503,6 +503,36 @@ mod should_pass {
             None,
         )]
     }
+
+    test_group_pass_assert! {
+        pragma,
+
+        query:"PRAGMA database_list;"=vec![Pragma::new(SchemaTableContainer::Table("database_list".into()), PragmaInvocation::Query)],
+        assignment:"PRAGMA schema.cache_size = 5;"=vec![
+            Pragma::new(
+                SchemaTableContainer::SchemaAndTable{
+                    schema: "schema".into(),
+                    table: "cache_size".into(),
+                },
+                PragmaInvocation::Assign { value: Token::new(Type::Number(5.0)) }
+            )],
+        assign_keyword:"PRAGMA schema.locking_mode = EXCLUSIVE;"=vec![
+            Pragma::new(
+                SchemaTableContainer::SchemaAndTable{
+                    schema: "schema".into(),
+                    table: "locking_mode".into(),
+                },
+                PragmaInvocation::Assign { value: Token::new(Type::Keyword(Keyword::EXCLUSIVE)) }
+            )],
+        call:"PRAGMA schema.optimize(0xfffe);"=vec![
+            Pragma::new(
+            SchemaTableContainer::SchemaAndTable{
+                schema: "schema".into(),
+                table: "optimize".into(),
+            },
+            PragmaInvocation::Call { value: Token::new(Type::Number(0xfffe as f64)) }
+            )]
+    }
 }
 
 #[allow(unused_macros)]

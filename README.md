@@ -65,7 +65,7 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`drop-trigger-stmt`](https://www.sqlite.org/lang_droptrigger.html)        | ✅              | ❌                | `DROP TRIGGER my_trigger;`                                |
 | [`drop-view-stmt`](https://www.sqlite.org/lang_dropview.html)              | ✅              | ❌                | `DROP VIEW my_view;`                                      |
 | [`insert-stmt`](https://www.sqlite.org/lang_insert.html)                   | ❌              | ❌                |                                                           |
-| [`pragma-stmt`](https://www.sqlite.org/pragma.html)                        | ❌              | ❌                |                                                           |
+| [`pragma-stmt`](https://www.sqlite.org/pragma.html)                        | ✅              | ❌                | `PRAGMA schema.optimize(0xfffe);`                         |
 | [`reindex-stmt`](https://www.sqlite.org/lang_reindex.html)                 | ✅              | ❌                | `REINDEX my_schema.my_table`                              |
 | [`release-stmt`](https://www.sqlite.org/lang_savepoint.html)               | ✅              | ❌                | `RELEASE SAVEPOINT latest_savepoint`                      |
 | [`rollback-stmt`](https://www.sqlite.org/lang_transaction.html)            | ✅              | ❌                | `ROLLBACK TO latest_savepoint;`                           |
@@ -105,20 +105,10 @@ Uninstall via:
 make uninstall
 ```
 
-<!--## Language Server Protocol (lsp)
-
-> [!WARNING]
-> This feature is not yet implemented.
-
-### Setup in Neovim
-
-> requires systemwide installation beforehand
--->
-
 ## Command line interface usage
 
 ```text
-LSP and analysis cli for sql. Check for valid syntax, semantics and perform dynamic analysis
+Static analysis and LSP for SQL in Rust
 
 Usage: sqleibniz [OPTIONS] [PATHS]...
 
@@ -128,12 +118,12 @@ Arguments:
 
 Options:
   -i, --ignore-config
-          instruct sqleibniz to ignore the configuration, if found
+          instruct sqleibniz to ignore the configuration, if specified
 
   -c, --config <CONFIG>
           path to the configuration
 
-          [default: leibniz.toml]
+          [default: leibniz.lua]
 
   -s, --silent
           disable stdout/stderr output
@@ -147,6 +137,8 @@ Options:
           - unimplemented:             Source file contains constructs sqleibniz does not yet understand
           - unknown-keyword:           Source file contains an unknown keyword
           - bad-sqleibniz-instruction: Source file contains invalid sqleibniz instruction
+          - sqlite-unsupported:        Source file uses sql features sqlite does not support
+          - quirk:                     Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
           - unterminated-string:       Source file contains an unterminated string
           - unknown-character:         The source file contains an unknown character
           - invalid-numeric-literal:   The source file contains an invalid numeric literal, either overflow or incorrect syntax
@@ -154,8 +146,20 @@ Options:
           - syntax:                    The source file contains a structure with incorrect syntax
           - semicolon:                 The source file is missing a semicolon
 
+      --ast-json
+          dump the abstract syntax tree as pretty printed json
+
+      --ast
+          dump the abstract syntax tree as rusts pretty printed debugging
+
+      --lsp
+          invoke sqleibniz as a language server
+
   -h, --help
-          Print help (see a summary with '-h'
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print versio
 ```
 
 ### Configuration
@@ -179,6 +183,8 @@ leibniz = {
 
         -- ignore sqlite specific diagnostics:
 
+        -- "SqliteUnsupported", -- Source file uses sql features sqlite does not support
+        -- "Quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
         -- "UnknownKeyword", -- an unknown keyword was encountered
         -- "UnterminatedString", -- a not closed string was found
         -- "UnknownCharacter", -- an unknown character was found
@@ -271,29 +277,28 @@ warn: Ignoring the following diagnostics, as specified:
  -> NoStatements
  -> Unimplemented
  -> BadSqleibnizInstruction
-=============================== test.sql ===============================
+======================== example/sqleibniz.sql =========================
 error[Syntax]: Unexpected Literal
- -> /home/teo/programming/sqleibniz/test.sql:13:20
+ -> /home/teo/programming/sqleibniz/example/sqleibniz.sql:13:20
  11 | -- will cause a diagnostic
  12 | -- incorrect, because EXPLAIN wants a sql stmt, not a literal
  13 | EXPLAIN QUERY PLAN 25;
-    |                    ^^ error occurs here.
+    |                    ~~ error occurs here.
     |
-    ~ note: Literal Number(25.0) disallowed at this point.
-  * Syntax: The source file contains a structure with incorrect syntax
- docs: https://www.sqlite.org/syntax/sql-stmt.html
+    ~ note: Literal Number(25.0) can not start a statement
+    ~ docs: https://www.sqlite.org/syntax/sql-stmt.html
+ * Syntax: The source file contains a structure with incorrect syntax
 =============================== Summary ================================
-[-] test.sql:
+[-] example/sqleibniz.sql:
     1 Error(s) detected
     0 Error(s) ignored
 
-=> 0/1 Files verified successfully, 1 verification failed
+=> 0/1 Files verified successfully, 1 verification failed.
 ```
 
 Or syntax highlighted via [`highlight::highlight`](https://github.com/xNaCly/sqleibniz/blob/master/src/highlight/mod.rs#L50) for the terminal:
 
 ![rendered by the terminal](https://github.com/user-attachments/assets/dd349d59-1107-4421-82e4-f95549b43e85)
-
 
 `@sqleibniz::expect` is implemented by inserting a token with the type
 `Type::InstructionExpect`. The parser encounters this token and consumes all
@@ -302,6 +307,25 @@ skipping the analysis of the statement directly after the sqleibniz
 instruction. A statement is terminated via `;`. `@sqleibniz::expect` therefore
 supports ignoring diagnostics for statements spanning either a single line or
 multiple lines.
+
+## Language Server Protocol (lsp)
+
+Sqleibniz has an LSP provider included, with in-editor diagnostics, hover info and other dx helpers.
+
+### Setup in Neovim
+
+> requires systemwide installation beforehand via `make install`
+
+As simple as adding the following to the neovim lua config:
+
+```lua
+vim.lsp.config.sqleibniz = {
+    cmd = { '/usr/bin/sqleibniz', '--lsp' },
+    filetypes = { "sql" },
+    root_markers = { "leibniz.lua" }
+}
+vim.lsp.enable('sqleibniz')
+```
 
 ## Contribution
 
@@ -330,26 +354,51 @@ parser callstack and the resulting AST:
 
 ```text
 sqleibniz master M :: cargo run --features trace -- -i test.sql
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
-     Running `target/debug/sqleibniz -i test.sql`
 ============================== CALLSTACK ===============================
- ↳ Parser::parse(Some(Keyword(EXPLAIN)))
-  ↳ Parser::sql_stmt_list(Some(Keyword(EXPLAIN)))
-   ↳ Parser::sql_stmt_prefix(Some(Keyword(EXPLAIN)))
-    ↳ Parser::sql_stmt(Some(Keyword(VACUUM)))
-     ↳ Parser::vacuum_stmt(Some(Keyword(VACUUM)))
-    ↳ Parser::sql_stmt_prefix(Some(Keyword(EXPLAIN)))
-     ↳ Parser::sql_stmt(Some(Keyword(VACUUM)))
-      ↳ Parser::vacuum_stmt(Some(Keyword(VACUUM)))
+↳ parse | Keyword(EXPLAIN)
+ ↳ sql_stmt_list | Keyword(EXPLAIN)
+  ↳ sql_stmt_prefix | Keyword(EXPLAIN)
+   ↳ sql_stmt | Keyword(VACUUM)
+    ↳ vacuum_stmt | Keyword(VACUUM)
+   ↳ sql_stmt_prefix | Keyword(EXPLAIN)
+    ↳ sql_stmt | Keyword(VACUUM)
+     ↳ vacuum_stmt | Keyword(VACUUM)
 ================================= AST ==================================
 - Explain(Keyword(EXPLAIN)) [child=Vacuum { t: Token { ttype: Keyword(VACUUM), start: 8, end: 14, line: 0 }, schema_name: None, filename: None }]
-- Explain(Keyword(EXPLAIN)) [child=Vacuum { t: Token { ttype: Keyword(VACUUM), start: 19, end: 25, line: 1 }, schema_name: Some(Token { ttype: Ident("my_big_schema"), start: 26, end: 39, line: 1 }), filename: Some(Token { ttype: String("
-repacked.db"), start: 45, end: 58, line: 1 }) }]
-took: [122.011µs]
+- Explain(Keyword(EXPLAIN)) [child=Vacuum { t: Token { ttype: Keyword(VACUUM), start: 19, end: 25, line: 1 }, schema_name: Some(Token { ttype: Ident("my_big_schema"), start: 26, end: 39, li
+ne: 1 }), filename: Some(Token { ttype: String("repacked.db"), start: 45, end: 58, line: 1 }) }]
+took: [120.166µs]
 =============================== Summary ================================
 [+] test.sql:
     0 Error(s) detected
     0 Error(s) ignored
 
 => 1/1 Files verified successfully, 0 verification failed.
+```
+
+There is also `--ast` and `--ast-json`, both enabling ast introspection:
+
+```json
+[
+  {
+    "child": {
+      "filename": null,
+      "schema_name": null,
+      "type": "Vacuum"
+    },
+    "type": "Explain"
+  },
+  {
+    "child": {
+      "filename": {
+        "String": "repacked.db"
+      },
+      "schema_name": {
+        "Ident": "my_big_schema"
+      },
+      "type": "Vacuum"
+    },
+    "type": "Explain"
+  }
+]
 ```

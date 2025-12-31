@@ -11,6 +11,8 @@ leibniz = {
 
         -- ignore sqlite specific diagnostics:
 
+        -- "SqliteUnsupported", -- Source file uses sql features sqlite does not support
+        -- "Quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
         -- "UnknownKeyword", -- an unknown keyword was encountered
         -- "UnterminatedString", -- a not closed string was found
         -- "UnknownCharacter", -- an unknown character was found

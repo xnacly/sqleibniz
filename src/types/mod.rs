@@ -150,13 +150,16 @@ impl Eq for Type {}
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Token {
     pub ttype: Type,
+    #[serde(skip)]
     pub start: usize,
+    #[serde(skip)]
     pub end: usize,
+    #[serde(skip)]
     pub line: usize,
 }
 
+#[cfg(test)]
 impl Token {
-    // #[cfg(test)]
     pub fn new(ttype: Type) -> Self {
         Self {
             ttype,

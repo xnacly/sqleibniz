@@ -26,7 +26,8 @@ impl_field_serializable_with_serde_to_value!(
     Keyword,
     SqliteStorageClass,
     SchemaTableContainer,
-    Type
+    Type,
+    PragmaInvocation
 );
 
 impl FieldSerializable for ColumnConstraint {

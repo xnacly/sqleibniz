@@ -1,5 +1,6 @@
 use nodes::{BindParameter, SchemaTableContainer};
 
+#[cfg(feature = "trace")]
 use proc::trace;
 
 use crate::{
@@ -1354,7 +1355,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        None
+        Some(fk)
     }
 
     /// https://www.sqlite.org/syntax/column-def.html

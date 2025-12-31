@@ -161,6 +161,13 @@ Either modification causes the SQL statement to behave as a query and to return 
 how the SQL statement would have operated if the EXPLAIN keyword or phrase had been omitted.
 
 In depth guide for `EXPLAIN QUERY PLAN`: https://www.sqlite.org/eqp.html
+
+# Examples
+
+```sql
+EXPLAIN VACUUM;
+EXPLAIN QUERY PLAN VACUUM;
+```
 ",
     child: Box<dyn Node>
 );
@@ -169,7 +176,18 @@ node!(
     Vacuum,
     r"Vacuum stmt, see: https://www.sqlite.org/lang_vacuum.html
 
-The VACUUM command rebuilds the database file, repacking it into a minimal amount of disk space. ",
+The VACUUM command rebuilds the database file, repacking it into a minimal amount of disk space. 
+
+# Examples
+
+```sql
+VACUUM;
+VACUUM schema_name;
+VACUUM INTO 'filename';
+VACUUM schema_name INTO 'filename';
+```
+",
+
     schema_name: Option<Token>,
     filename: Option<Token>
 );
@@ -184,6 +202,19 @@ closed or if an error occurs and the ROLLBACK conflict resolution algorithm is s
 
 Transactions can be DEFERRED, IMMEDIATE, or EXCLUSIVE. The default transaction behavior is
 DEFERRED. 
+
+# Examples
+
+```sql
+BEGIN;
+BEGIN TRANSACTION;
+BEGIN DEFERRED;
+BEGIN IMMEDIATE;
+BEGIN EXCLUSIVE;
+BEGIN DEFERRED TRANSACTION;
+BEGIN IMMEDIATE TRANSACTION;
+BEGIN EXCLUSIVE TRANSACTION;
+```
 ",
     transaction_kind: Option<Keyword>
 );
@@ -194,6 +225,15 @@ node!(
 
 END TRANSACTION is an alias for COMMIT. Transactions created using BEGIN...COMMIT do not nest. For
 nested transactions, use the SAVEPOINT and RELEASE commands.
+
+# Examples
+
+```sql
+COMMIT;
+END;
+COMMIT TRANSACTION;
+END TRANSACTION;
+```
 ",
 );
 
@@ -206,6 +246,17 @@ corresponding SAVEPOINT. Note that unlike that plain ROLLBACK command (without t
 ROLLBACK TO command does not cancel the transaction. Instead of cancelling the transaction, the
 ROLLBACK TO command restarts the transaction again at the beginning. All intervening SAVEPOINTs are
 canceled, however.
+
+# Examples
+
+```sql
+ROLLBACK;
+ROLLBACK TO save_point;
+ROLLBACK TO SAVEPOINT save_point;
+ROLLBACK TRANSACTION;
+ROLLBACK TRANSACTION TO save_point;
+ROLLBACK TRANSACTION TO SAVEPOINT save_point;
+```
 ",
     save_point: Option<String>
 );
@@ -218,6 +269,13 @@ This statement detaches an additional database connection previously attached us
 statement. When not in shared cache mode, it is possible to have the same database file attached
 multiple times using different names, and detaching one connection to a file will leave the others
 intact.
+
+# Examples
+
+```sql
+DETACH schema_name;
+DETACH DATABASE schema_name;
+```
 ",
     schema_name: String
 );
@@ -233,6 +291,15 @@ main database and all attached databases are analyzed. If a schema name is given
 then all tables and indices in that one database are analyzed. If the argument is a table name,
 then only that table and the indices associated with that table are analyzed. If the argument is
 an index name, then only that one index is analyzed.
+
+# Examples
+
+```sql
+ANALYZE;
+ANALYZE schema_name;
+ANALYZE index_or_table_name.index_or_table_name;
+ANALYZE schema_name.index_or_table_name;
+```
     ",
     target: Option<SchemaTableContainer>
 );
@@ -256,18 +323,39 @@ The DROP INDEX statement removes an index added with the CREATE INDEX statement.
 completely removed from the disk. The only way to recover the index is to reenter the appropriate
 CREATE INDEX command, see https://www.sqlite.org/lang_dropindex.html.
 
+# Examples
+
+```sql
+DROP INDEX index_name;
+DROP INDEX IF EXISTS schema_name.index_name;
+```
+
 ## DROP TABLE
 
 The DROP TABLE statement removes a table added with the CREATE TABLE statement. The name specified
 is the table name. The dropped table is completely removed from the database schema and the disk
 file. The table can not be recovered. All indices and triggers associated with the table are also
 deleted, see: https://www.sqlite.org/lang_droptable.html.
+
+# Examples
+
+```sql
+DROP TABLE table_name;
+DROP TABLE IF EXISTS schema_name.table_name;
+```
                     
 ## DROP TRIGGER
 
 The DROP TRIGGER statement removes a trigger created by the CREATE TRIGGER statement. Once removed, the trigger definition 
 is no longer present in the sqlite_schema (or sqlite_temp_schema) table and is not fired by any subsequent
 INSERT, UPDATE or DELETE statements, see: https://www.sqlite.org/lang_droptrigger.html.
+
+# Examples
+
+```sql
+DROP TRIGGER trigger_name;
+DROP TRIGGER IF EXISTS schema_name.trigger_name;
+```
                                                 
 ## DROP VIEW
 
@@ -276,6 +364,12 @@ The view definition is removed from the database schema,
 but no actual data in the underlying base tables is modified,
 see: https://www.sqlite.org/lang_dropview.html.
 
+# Examples
+
+```sql
+DROP VIEW view_name;
+DROP VIEW IF EXISTS schema_name.view_name;
+```
 ",
     if_exists: bool,
     ttype: Keyword,
@@ -288,6 +382,12 @@ node!(
 
 SAVEPOINTs are a method of creating transactions, similar to BEGIN and COMMIT, except that the
 SAVEPOINT and RELEASE commands are named and may be nested.
+
+# Examples
+
+```sql
+SAVEPOINT savepoint_name;
+```
 ",
     savepoint_name: String
 );
@@ -299,6 +399,13 @@ node!(
 The RELEASE command is like a COMMIT for a SAVEPOINT. The RELEASE command causes all savepoints
 back to and including the most recent savepoint with a matching name to be removed from the
 transaction stack.
+
+# Examples
+
+```sql
+RELEASE savepoint_name;
+RELEASE SAVEPOINT savepoint_name;
+```
 ",
     savepoint_name: String
 );
@@ -309,6 +416,13 @@ node!(
 
 The ATTACH DATABASE statement adds another database file to the current database connection.
 Database files that were previously attached can be removed using the DETACH DATABASE command. 
+
+# Examples
+
+```sql
+ATTACH DATABASE 'users.db' AS users;
+ATTACH 'users.db' AS users;
+```
 ",
     schema_name: String,
     expr: Expr
@@ -320,7 +434,16 @@ node!(
 
 The REINDEX command is used to delete and recreate indices from scratch. This is useful when the
 definition of a collation sequence has changed, or when there are indexes on expressions involving
-a function whose definition has changed.",
+a function whose definition has changed.
+
+# Examples
+
+```sql
+REINDEX;
+REINDEX collation_name;
+REINDEX schema_name.table_name;
+```
+",
     target: Option<SchemaTableContainer>
 );
 
@@ -331,7 +454,22 @@ node!(
 SQLite supports a limited subset of ALTER TABLE:
 The ALTER TABLE command in SQLite allows these alterations of an existing table: a table can be
 renamed, a column can be renamed, a column can be added to a table or a column can be dropped
-from the table.",
+from the table.
+
+# Examples
+
+```sql
+ALTER TABLE schema.table_name RENAME TO new_table;
+ALTER TABLE schema.table_name RENAME old_column_name TO new_column_name;
+ALTER TABLE schema.table_name RENAME COLUMN old_column_name TO new_column_name;
+
+ALTER TABLE schema.table_name ADD new_column_name TEXT;
+ALTER TABLE schema.table_name ADD COLUMN new_column_name TEXT;
+
+ALTER TABLE schema.table_name DROP column_name;
+ALTER TABLE schema.table_name DROP COLUMN column_name;
+```
+",
     target: SchemaTableContainer,
     rename_to: Option<String>,
     rename_column_target: Option<String>,

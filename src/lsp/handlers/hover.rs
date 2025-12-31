@@ -20,12 +20,7 @@ pub fn handle(
         .next_back()
     {
         Some(node) => {
-            format!(
-                "# {}\n{}\n---\n```rust\n{:#?}\n```\n",
-                node.name(),
-                node.doc(),
-                node,
-            )
+            format!("#\n{}\n{}", node.name(), node.doc(),)
         }
         None => "Unknown".into(),
     };

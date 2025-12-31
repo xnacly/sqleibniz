@@ -19,7 +19,7 @@ macro_rules! test_group_pass_assert {
 
                 let serialized_ast = serde_json::to_string(
                     &ast.into_iter()
-                        .map(|n| n.unwrap().as_serializable())
+                        .map(|n| n.as_serializable())
                         .collect::<Vec<_>>(),
                 ).unwrap();
                 let serialized_expected = serde_json::to_string(

@@ -192,13 +192,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     pub fn parse(&mut self) -> Vec<Box<dyn nodes::Node>> {
         self.sql_stmt_list()
     }
 
     /// see: https://www.sqlite.org/syntax/sql-stmt-list.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn sql_stmt_list(&mut self) -> Vec<Box<dyn nodes::Node>> {
         let mut r = vec![];
         while !self.is_eof() {
@@ -225,7 +225,7 @@ impl<'a> Parser<'a> {
         r
     }
 
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn sql_stmt_prefix(&mut self) -> Option<Box<dyn nodes::Node>> {
         let r: Option<Box<dyn nodes::Node>> = match self.cur().ttype {
             Type::Keyword(Keyword::EXPLAIN) => {
@@ -252,7 +252,7 @@ impl<'a> Parser<'a> {
     }
 
     /// see: https://www.sqlite.org/syntax/sql-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn sql_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         match self.cur().ttype {
             // TODO: add new statement starts here
@@ -357,21 +357,21 @@ impl<'a> Parser<'a> {
     }
 
     // TODO: add new statement function here *_stmt()
-    // #[trace]
+    // #[cfg_attr(feature = "trace", trace)]
     // fn $1_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
     //
     //
     // }
 
     /// https://www.sqlite.org/lang_createindex.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn create_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         println!("Parser::create_stmt");
         None
     }
 
     /// https://www.sqlite.org/lang_altertable.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn alter_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Alter {
             t: self.cur().clone(),
@@ -454,7 +454,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/reindex-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn reindex_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Reindex {
             t: self.cur().clone(),
@@ -475,7 +475,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/attach-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn attach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let t = self.cur().clone();
         // skipping ATTACH
@@ -502,7 +502,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/release-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn release_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Release {
             t: self.cur().clone(),
@@ -525,7 +525,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/savepoint-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn savepoint_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut s = nodes::Savepoint {
             t: self.cur().clone(),
@@ -545,7 +545,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_droptable.html
     /// https://www.sqlite.org/lang_droptrigger.html
     /// https://www.sqlite.org/lang_dropview.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn drop_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let t = self.cur().clone();
         self.advance();
@@ -601,7 +601,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/analyze-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn analyse_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Analyze {
             t: self.cur().clone(),
@@ -664,7 +664,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/detach-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn detach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let t = self.cur().clone();
         self.advance();
@@ -685,7 +685,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/rollback-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn rollback_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut rollback = nodes::Rollback {
             t: self.cur().clone(),
@@ -766,7 +766,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/commit-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn commit_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let commit: Option<Box<dyn nodes::Node>> = some_box!(nodes::Commit {
             t: self.cur().clone(),
@@ -802,7 +802,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/begin-stmt.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn begin_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut begin: nodes::Begin = nodes::Begin {
             t: self.cur().clone(),
@@ -869,7 +869,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/lang_vacuum.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn vacuum_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut v = nodes::Vacuum {
             t: self.cur().clone(),
@@ -939,7 +939,7 @@ impl<'a> Parser<'a> {
     }
 
     /// see: https://www.sqlite.org/syntax/literal-value.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn literal_value(&mut self) -> Option<Box<dyn nodes::Node>> {
         let cur = self.cur();
         match cur.ttype {
@@ -1072,7 +1072,7 @@ impl<'a> Parser<'a> {
     }
 
     /// parses schema_name.table_name and table_name
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn schema_table_container(&mut self) -> Option<SchemaTableContainer> {
         match self.cur().ttype.clone() {
             Type::Ident(schema) if self.next_is(Type::Dot) => {
@@ -1141,7 +1141,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/conflict-clause.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn conflict_clause(&mut self) -> Option<Keyword> {
         if self.is_keyword(Keyword::ON) {
             self.advance();
@@ -1192,7 +1192,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/foreign-key-clause.html but specifically the ON and MATCH
     /// paths, necessary because the end of the block moves back to the state machine states ON and
     /// MATCH
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn foreign_key_clause_on_and_match(&mut self, fk: &mut ForeignKeyClause) -> Option<()> {
         let mut is_delete = false;
         if self.is_keyword(Keyword::ON) {
@@ -1280,7 +1280,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/foreign-key-clause.html and https://sqlite.org/foreignkeys.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn foreign_key_clause(&mut self) -> Option<ForeignKeyClause> {
         let mut fk = ForeignKeyClause {
             foreign_table: String::new(),
@@ -1358,7 +1358,7 @@ impl<'a> Parser<'a> {
     }
 
     /// https://www.sqlite.org/syntax/column-def.html
-    #[trace]
+    #[cfg_attr(feature = "trace", trace)]
     fn column_def(&mut self) -> Option<nodes::ColumnDef> {
         let mut def = nodes::ColumnDef {
             t: self.cur().clone(),
@@ -1428,6 +1428,15 @@ impl<'a> Parser<'a> {
                 }
                 self.consume(Type::BraceRight);
             }
+        } else {
+            let mut err = self.err(
+                "Possibly unintended flexible typed column",
+                "SQLite allows columns without a declared type. Such columns use dynamic typing and type affinity is not enforced. Consider adding TEXT, BLOB, REAL, or INTEGER if this is unintended.",
+                self.cur(),
+                Rule::Quirk,
+            );
+            err.doc_url = Some("https://www.sqlite.org/quirks.html#the_datatype_is_optional");
+            self.errors.push(err);
         }
 
         // column_constraint: https://www.sqlite.org/syntax/column-constraint.html

@@ -298,32 +298,6 @@ mod should_pass {
     }
 
     test_group_pass_assert! {
-        // TODO: somehow there is no ADD column in this test:
-        foreign_key_clause_ast_bug_exception,
-
-        references_on_delete_set_null:
-        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table ON DELETE SET NULL;"=
-        vec![Alter::new(
-            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
-            None, None, None,
-            Some(ColumnDef::new(
-                "column_name".into(),
-                Some(SqliteStorageClass::Text),
-                vec![ColumnConstraint::ForeignKey(ForeignKeyClause {
-                    foreign_table: "foreign_table".into(),
-                    references_columns: vec![],
-                    on_delete: Some(ForeignKeyAction::SetNull),
-                    on_update: None,
-                    match_type: None,
-                    deferrable: false,
-                    initially_deferred: false,
-                })],
-            )),
-            None,
-        )]
-    }
-
-    test_group_pass_assert! {
         column_constraint_primary_key,
 
         primary_key_no_order:

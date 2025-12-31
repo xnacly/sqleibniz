@@ -1429,13 +1429,22 @@ impl<'a> Parser<'a> {
                 self.consume(Type::BraceRight);
             }
         } else {
-            let mut err = self.err(
-                "Possibly unintended flexible typed column",
-                "SQLite allows columns without a declared type. Such columns use dynamic typing and type affinity is not enforced. Consider adding TEXT, BLOB, REAL, or INTEGER if this is unintended.",
-                self.cur(),
-                Rule::Quirk,
-            );
-            err.doc_url = Some("https://www.sqlite.org/quirks.html#the_datatype_is_optional");
+            let tok = self
+                .tokens
+                .get(self.pos.saturating_sub(1))
+                .unwrap_or_else(|| self.cur());
+
+            let err = Error {
+                improved_line: None,
+                file: self.name.to_string(),
+                line: tok.line,
+                rule: Rule::Quirk,
+                note: "SQLite allows columns without a declared type. Such columns use dynamic typing and type affinity is not enforced. Consider adding TEXT, BLOB, REAL, or INTEGER if this is unintended.".into(),
+                msg: "Possibly unintended flexible typed column".into(),
+                start: tok.start,
+                end: tok.end,
+                doc_url: Some("https://www.sqlite.org/quirks.html#the_datatype_is_optional"),
+            };
             self.errors.push(err);
         }
 

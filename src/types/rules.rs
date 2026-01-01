@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize)]
 /// Rule is attached to each error and can be supplied to sqleibniz via the Config structure serialized in ./leibniz.toml
 #[derive(clap::ValueEnum)]
 pub enum Rule {

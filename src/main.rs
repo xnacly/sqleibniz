@@ -10,6 +10,8 @@ use lexer::Lexer;
 use types::config::Config;
 use types::rules::Rule;
 
+use crate::error::Error;
+
 /// error does formatting and highlighting for errors
 mod error;
 /// highlight implements logic for highlighting tokens found in a string
@@ -44,6 +46,10 @@ struct Cli {
     /// disable stdout/stderr output
     #[arg(short = 's', long)]
     silent: bool,
+
+    /// keep it simple, stupid :^): make all stdoutput small and summarizing
+    #[arg(short = 'k', long)]
+    kiss: bool,
 
     /// disable diagnostics by their rules, all are enabled by default - this may change in the
     /// future
@@ -144,7 +150,7 @@ fn main() {
         config.disabled_rules.append(&mut p);
     }
 
-    if !config.disabled_rules.is_empty() && !args.silent {
+    if !config.disabled_rules.is_empty() && !args.silent && !args.kiss {
         let mut ignore_buffer = builder::Builder::default();
         warn(
             &mut ignore_buffer,
@@ -155,6 +161,7 @@ fn main() {
             ignore_buffer.write_str(rule.name());
             ignore_buffer.write_char('\n');
         }
+
         print!("{}", ignore_buffer.string())
     }
 
@@ -172,7 +179,7 @@ fn main() {
     let start = SystemTime::now();
 
     for file in &mut files {
-        let mut errors = vec![];
+        let mut errors: Vec<Error> = vec![];
         let content = match fs::read(&file.name) {
             Ok(c) => c,
             Err(err) => {
@@ -189,7 +196,7 @@ fn main() {
         let mut ignored_errors = 0;
         let mut lexer = Lexer::new(&content, file.name.as_str());
         let toks = lexer.run();
-        errors.push(lexer.errors);
+        errors.append(&mut lexer.errors);
 
         if !toks.is_empty() {
             #[cfg(feature = "trace")]
@@ -220,12 +227,11 @@ fn main() {
                 println!("{:#?}", &ast);
             }
 
-            errors.push(parser.errors);
+            errors.append(&mut parser.errors);
         }
 
-        let processed_errors = errors
-            .iter()
-            .flatten()
+        let mut processed_errors = errors
+            .into_iter()
             .filter(|e| {
                 if config.disabled_rules.contains(&e.rule) {
                     ignored_errors += 1;
@@ -234,25 +240,38 @@ fn main() {
                     true
                 }
             })
-            .collect::<Vec<&error::Error>>();
+            .collect::<Vec<error::Error>>();
 
         if !processed_errors.is_empty() && !args.silent {
-            error::print_str_colored(
-                &mut error_string_builder,
-                &format!("{:=^72}\n", format!(" {} ", file.name)),
-                error::Color::Blue,
-            );
+            if !args.kiss {
+                error::print_str_colored(
+                    &mut error_string_builder,
+                    &format!("{:=^72}\n", format!(" {} ", file.name)),
+                    error::Color::Blue,
+                );
+            }
             let error_count = processed_errors.len();
-            for (i, e) in processed_errors.iter().enumerate() {
-                (**e)
-                    .clone()
-                    .print(&mut error_string_builder, &content, &toks);
+            for (i, e) in processed_errors.iter_mut().enumerate() {
+                if args.kiss {
+                    println!(
+                        "{}: {}, {} at l:{}:{}-{}",
+                        e.rule.name(),
+                        e.msg,
+                        e.note,
+                        e.line,
+                        e.start,
+                        e.end
+                    );
+                } else {
+                    e.print(&mut error_string_builder, &content, &toks);
+                }
 
                 if i + 1 != error_count {
                     error_string_builder.write_char('\n');
                 }
             }
         }
+
         file.errors = processed_errors.len();
         file.ignored_errors = ignored_errors;
     }
@@ -320,7 +339,7 @@ fn main() {
         files.len() - verified
     ));
 
-    if !args.silent {
+    if !args.silent && !args.kiss {
         print!("{}", error_string_builder.string());
     }
 

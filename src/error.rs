@@ -5,13 +5,13 @@ use crate::{
     types::{Token, rules::Rule},
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ImprovedLine {
     pub snippet: &'static str,
     pub start: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Error {
     pub file: String,
     pub line: usize,

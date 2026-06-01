@@ -11,5 +11,7 @@ pub mod lexer;
 pub mod lsp;
 /// parser converts the token stream into an abstract syntax tree
 pub mod parser;
+/// sarif converts diagnostics into Static Analysis Results Interchange Format logs
+pub mod sarif;
 /// types holds all shared types between the above modules
 pub mod types;

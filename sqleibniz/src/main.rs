@@ -28,11 +28,11 @@ struct Cli {
     config: String,
 
     /// disable stdout/stderr output
-    #[arg(short = 's', long)]
+    #[arg(short = 's', long, conflicts_with = "sarif")]
     silent: bool,
 
     /// keep it simple, stupid :^): make all stdoutput small and summarizing
-    #[arg(short = 'k', long)]
+    #[arg(short = 'k', long, conflicts_with = "sarif")]
     kiss: bool,
 
     /// disable diagnostics by their rules, all are enabled by default - this may change in the
@@ -42,14 +42,18 @@ struct Cli {
     disable: Option<Vec<Rule>>,
 
     /// dump the abstract syntax tree as pretty printed json
-    #[arg(long)]
+    #[arg(long, conflicts_with = "sarif")]
     ast_json: bool,
     /// dump the abstract syntax tree as rusts pretty printed debugging
-    #[arg(long)]
+    #[arg(long, conflicts_with = "sarif")]
     ast: bool,
 
+    /// emit SARIF 2.1.0 JSON to stdout
+    #[arg(long, conflicts_with_all = ["silent", "kiss", "ast_json", "ast", "lsp"])]
+    sarif: bool,
+
     /// invoke sqleibniz as a language server
-    #[arg(long)]
+    #[arg(long, conflicts_with = "sarif")]
     lsp: bool,
     // TODO: add a --doc <fuzzy ast node / ast name> to print node documentation
 }
@@ -85,6 +89,7 @@ struct FileResult {
     name: String,
     errors: usize,
     ignored_errors: usize,
+    diagnostics: Vec<Error>,
 }
 
 fn main() {
@@ -101,11 +106,15 @@ fn main() {
 
     if args.paths.is_empty() {
         if !args.silent {
-            error::err(
-                &mut error_string_builder,
-                "no source file(s) provided, exiting",
-            );
-            print!("{}", error_string_builder.string())
+            if args.sarif {
+                eprintln!("error: no source file(s) provided, exiting");
+            } else {
+                error::err(
+                    &mut error_string_builder,
+                    "no source file(s) provided, exiting",
+                );
+                print!("{}", error_string_builder.string())
+            }
         }
         exit(1);
     }
@@ -122,7 +131,7 @@ fn main() {
         match configuration(&lua, &args.config) {
             Ok(conf) => config = conf,
             Err(err) => {
-                if !args.silent {
+                if !args.silent && !args.sarif {
                     error::warn(&mut error_string_builder, &err.to_string());
                 }
             }
@@ -134,7 +143,7 @@ fn main() {
         config.disabled_rules.append(&mut p);
     }
 
-    if !config.disabled_rules.is_empty() && !args.silent && !args.kiss {
+    if !config.disabled_rules.is_empty() && !args.silent && !args.kiss && !args.sarif {
         let mut ignore_buffer = builder::Builder::default();
         warn(
             &mut ignore_buffer,
@@ -156,6 +165,7 @@ fn main() {
             name,
             errors: 0,
             ignored_errors: 0,
+            diagnostics: vec![],
         })
         .collect::<Vec<FileResult>>();
 
@@ -167,13 +177,15 @@ fn main() {
         let content = match fs::read(&file.name) {
             Ok(c) => c,
             Err(err) => {
-                if !args.silent {
+                if args.sarif {
+                    eprintln!("error: failed to read file '{}': {}", file.name, err);
+                } else if !args.silent {
                     error::err(
                         &mut error_string_builder,
                         &format!("failed to read file '{}': {}", file.name, err),
                     );
+                    print!("{}", error_string_builder.string());
                 }
-                print!("{}", error_string_builder.string());
                 exit(1);
             }
         };
@@ -226,7 +238,7 @@ fn main() {
             })
             .collect::<Vec<error::Error>>();
 
-        if !processed_errors.is_empty() && !args.silent {
+        if !processed_errors.is_empty() && !args.silent && !args.sarif {
             if !args.kiss {
                 error::print_str_colored(
                     &mut error_string_builder,
@@ -258,11 +270,29 @@ fn main() {
 
         file.errors = processed_errors.len();
         file.ignored_errors = ignored_errors;
+        file.diagnostics = processed_errors;
     }
     #[cfg(feature = "trace")]
     let took = SystemTime::now().duration_since(start).unwrap();
 
     if args.silent {
+        let verified = files.iter().filter(|f| f.errors == 0).count();
+        if verified != files.len() {
+            exit(1);
+        }
+        return;
+    }
+
+    if args.sarif {
+        let diagnostics = files
+            .iter()
+            .flat_map(|file| file.diagnostics.iter().cloned())
+            .collect::<Vec<_>>();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&sqleibniz::sarif::log(&diagnostics))
+                .expect("SARIF log serialization must succeed")
+        );
         let verified = files.iter().filter(|f| f.errors == 0).count();
         if verified != files.len() {
             exit(1);

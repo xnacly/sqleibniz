@@ -122,11 +122,14 @@ Options:
 
   -c, --config <CONFIG>
           path to the configuration
-
+          
           [default: leibniz.lua]
 
   -s, --silent
           disable stdout/stderr output
+
+  -k, --kiss
+          keep it simple, stupid :^): make all stdoutput small and summarizing
 
   -D <DISABLE>
           disable diagnostics by their rules, all are enabled by default - this may change in the future
@@ -138,7 +141,7 @@ Options:
           - unknown-keyword:           Source file contains an unknown keyword
           - bad-sqleibniz-instruction: Source file contains invalid sqleibniz instruction
           - sqlite-unsupported:        Source file uses sql features sqlite does not support
-          - quirk:                     Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
+          - quirk:                     Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates from a stricter, conventional SQL model
           - unterminated-string:       Source file contains an unterminated string
           - unknown-character:         The source file contains an unknown character
           - invalid-numeric-literal:   The source file contains an invalid numeric literal, either overflow or incorrect syntax
@@ -152,6 +155,9 @@ Options:
       --ast
           dump the abstract syntax tree as rusts pretty printed debugging
 
+      --sarif
+          emit SARIF 2.1.0 JSON to stdout
+
       --lsp
           invoke sqleibniz as a language server
 
@@ -159,7 +165,7 @@ Options:
           Print help (see a summary with '-h')
 
   -V, --version
-          Print versio
+          Print version
 ```
 
 ### Configuration

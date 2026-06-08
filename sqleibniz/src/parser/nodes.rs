@@ -1,5 +1,21 @@
-use crate::parser::debug::FieldSerializable;
-use crate::types::{Keyword, Token, storage::SqliteStorageClass};
+use crate::parser::debug::{FieldHookContexts, FieldSerializable};
+use crate::types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass};
+
+macro_rules! field_hook_contexts {
+    () => {
+        Vec::new()
+    };
+    ($($field:expr),+ $(,)?) => {
+        vec![
+            $(
+                $field.field_hook_contexts(),
+            )+
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<HookContext>>()
+    };
+}
 
 macro_rules! node {
     ($node_name:ident,$documentation:literal,$($field_name:ident:$field_type:ty),*) => {
@@ -42,6 +58,20 @@ macro_rules! node {
                 serde_json::Value::Object(map)
             }
 
+            fn as_hook_context(&self) -> HookContext {
+                let children = field_hook_contexts!($(self.$field_name),*);
+
+                HookContext {
+                    node: stringify!($node_name).into(),
+                    kind: stringify!($node_name).into(),
+                    content: None,
+                    line: self.t.line,
+                    start: self.t.start,
+                    finish: self.t.end,
+                    children,
+                }
+            }
+
             fn doc(&self) -> &str {
                 $documentation
             }
@@ -63,6 +93,12 @@ macro_rules! node {
                 self.as_serializable()
             }
         }
+
+        impl FieldHookContexts for $node_name {
+            fn field_hook_contexts(&self) -> Vec<HookContext> {
+                vec![self.as_hook_context()]
+            }
+        }
     };
 }
 
@@ -73,6 +109,8 @@ pub trait Node: std::fmt::Debug {
     fn name(&self) -> &str;
     /// serializes self as json
     fn as_serializable(&self) -> serde_json::Value;
+    /// converts self into the data passed to Lua hooks
+    fn as_hook_context(&self) -> HookContext;
     /// returns the documentation url for sefl
     fn doc(&self) -> &str;
 

@@ -1,3 +1,5 @@
+use std::fs;
+
 use mlua::{FromLua, Function, Table, UserData};
 
 use super::{ctx::HookContext, rules::Rule};
@@ -9,6 +11,47 @@ pub struct Config {
     pub disabled_rules: Vec<Rule>,
     /// holds the hooks the user wants to execute
     pub hooks: Option<Vec<Hook>>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            disabled_rules: vec![],
+            hooks: None,
+        }
+    }
+}
+
+impl Config {
+    pub fn from_lua_file(lua: &mlua::Lua, file_name: &str) -> Result<Self, String> {
+        let conf_str = fs::read_to_string(file_name).map_err(|err| {
+            format!(
+                "Issue trying to read configuration from '{}': [{}], falling back to default configuration",
+                file_name, err
+            )
+        })?;
+        let globals = lua.globals();
+        lua.load(conf_str)
+            .set_name(file_name)
+            .exec()
+            .map_err(|err| format!("{}: {}", file_name, err))?;
+        let raw_conf = globals
+            .get::<mlua::Value>("leibniz")
+            .map_err(|err| format!("{}: {}", file_name, err))?;
+        if raw_conf.is_nil() {
+            return Err(format!(
+                "{}: leibniz table is missing from configuration",
+                file_name
+            ));
+        }
+        lua.unpack(raw_conf)
+            .map_err(|err| format!("{}: {}", file_name, err))
+    }
+
+    pub fn without_hooks(mut self) -> Self {
+        self.hooks = None;
+        self
+    }
 }
 
 impl FromLua for Config {

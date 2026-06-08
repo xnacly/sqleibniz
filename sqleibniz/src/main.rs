@@ -61,33 +61,6 @@ struct Cli {
     // TODO: add a --doc <fuzzy ast node / ast name> to print node documentation
 }
 
-fn configuration(lua: &mlua::Lua, file_name: &str) -> Result<Config, String> {
-    let conf_str = fs::read_to_string(file_name).map_err(|err| {
-        format!(
-            "Issue trying to read configuration from '{}': [{}], falling back to default configuration",
-            file_name, err
-        )
-    })?;
-    let globals = lua.globals();
-    lua.load(conf_str)
-        .set_name(file_name)
-        .exec()
-        .map_err(|err| format!("{}: {}", file_name, err))?;
-    let raw_conf = globals
-        .get::<mlua::Value>("leibniz")
-        .map_err(|err| format!("{}: {}", file_name, err))?;
-    if raw_conf.is_nil() {
-        return Err(format!(
-            "{}: leibniz table is missing from configuration",
-            file_name
-        ));
-    }
-    let conf: Config = lua
-        .unpack(raw_conf)
-        .map_err(|err| format!("{}: {}", file_name, err))?;
-    Ok(conf)
-}
-
 struct FileResult {
     name: String,
     errors: usize,
@@ -178,14 +151,11 @@ fn main() {
         exit(1);
     }
 
-    let mut config = Config {
-        disabled_rules: vec![],
-        hooks: None,
-    };
+    let mut config = Config::default();
     let lua = mlua::Lua::new();
 
     if !args.ignore_config {
-        match configuration(&lua, &args.config) {
+        match Config::from_lua_file(&lua, &args.config) {
             Ok(conf) => config = conf,
             Err(err) => {
                 if !args.silent && !args.sarif {

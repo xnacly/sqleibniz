@@ -4,7 +4,10 @@ mod handlers;
 use std::collections::HashMap;
 
 use error::LspError;
-use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId};
+use lsp_server::{
+    Connection, ErrorCode, ExtractError, Message, Notification, Request, RequestId, Response,
+    ResponseError,
+};
 use lsp_types::{
     DiagnosticOptions, InitializeParams, SaveOptions, ServerCapabilities, TextDocumentSyncKind,
     TextDocumentSyncOptions,
@@ -92,19 +95,19 @@ fn analyze_document(text: &[u8], name: &str) -> DocumentState {
 }
 
 fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), LspError> {
-    let _params: InitializeParams = serde_json::from_value(params).unwrap();
+    let _params: InitializeParams = serde_json::from_value(params)
+        .map_err(|err| format!("failed to parse initialize params: {err}"))?;
     lsp_log!("starting event loop");
     let mut documents = HashMap::<String, DocumentState>::new();
     for msg in &connection.receiver {
-        eprintln!("got msg: {msg:?}");
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                eprintln!("got request: {req:?}");
                 match req.method.as_str() {
                     "textDocument/hover" => {
+                        let id = req.id.clone();
                         match cast::<HoverRequest>(req) {
                             Ok((id, params)) => {
                                 let state = documents.get(
@@ -124,10 +127,11 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 }
                                 continue;
                             }
-                            Err(err) => panic!("{err:?}"),
+                            Err(err) => send_request_error(&connection, id, err)?,
                         };
                     }
                     "textDocument/diagnostic" => {
+                        let id = req.id.clone();
                         match cast::<DocumentDiagnosticRequest>(req) {
                             Ok((id, params)) => {
                                 let state = documents.get(&params.text_document.uri.to_string());
@@ -141,16 +145,18 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 }
                                 continue;
                             }
-                            Err(err) => panic!("{err:?}"),
+                            Err(err) => send_request_error(&connection, id, err)?,
                         };
                     }
-                    _ => lsp_log!("unsupported method"),
+                    _ => send_error(
+                        &connection,
+                        req.id,
+                        ErrorCode::MethodNotFound,
+                        format!("unsupported method '{}'", req.method),
+                    )?,
                 }
-                // ...
             }
-            Message::Response(resp) => {
-                eprintln!("got response: {resp:?}");
-            }
+            Message::Response(_) => {}
             Message::Notification(not) => match not.method.as_str() {
                 "textDocument/didChange" => {
                     match cast_noti::<DidChangeTextDocument>(not) {
@@ -164,7 +170,7 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 );
                             }
                         }
-                        Err(err) => panic!("failed to cast notification: {err:?}"),
+                        Err(err) => eprintln!("[sqleibniz]: failed to parse notification: {err}"),
                     };
                 }
                 "textDocument/didOpen" => {
@@ -180,13 +186,43 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 ),
                             );
                         }
-                        Err(err) => panic!("failed to cast notification: {err:?}"),
+                        Err(err) => eprintln!("[sqleibniz]: failed to parse notification: {err}"),
                     };
                 }
                 _ => lsp_log!("unsupported method"),
             },
         }
     }
+    Ok(())
+}
+
+fn send_request_error(
+    connection: &Connection,
+    id: RequestId,
+    err: ExtractError<Request>,
+) -> Result<(), LspError> {
+    send_error(connection, id, ErrorCode::InvalidParams, err.to_string())
+}
+
+fn send_error(
+    connection: &Connection,
+    id: RequestId,
+    code: ErrorCode,
+    message: String,
+) -> Result<(), LspError> {
+    let resp = Response {
+        id,
+        result: None,
+        error: Some(ResponseError {
+            code: code as i32,
+            message,
+            data: None,
+        }),
+    };
+    connection
+        .sender
+        .send(Message::Response(resp))
+        .map_err(|_| "failed to send error response")?;
     Ok(())
 }
 

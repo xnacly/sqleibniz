@@ -9,7 +9,6 @@ pub fn handle(
     id: RequestId,
     params: HoverParams,
 ) -> Result<(), LspError> {
-    eprintln!("got hover request #{id}");
     let Position { line, character } = params.text_document_position_params.position;
     let text = match ast
         .unwrap_or_default()
@@ -32,7 +31,8 @@ pub fn handle(
         }),
         range: None,
     };
-    let result = serde_json::to_value(&hover_result).unwrap();
+    let result = serde_json::to_value(&hover_result)
+        .map_err(|err| format!("failed to serialize hover: {err}"))?;
     let resp = Response {
         id,
         result: Some(result),

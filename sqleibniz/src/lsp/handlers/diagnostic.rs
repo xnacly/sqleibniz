@@ -40,12 +40,12 @@ pub fn handle(
     id: RequestId,
     _: DocumentDiagnosticParams,
 ) -> Result<(), LspError> {
-    eprintln!("got diagnostic request #{id}");
     let diagnostics = lsp_types::FullDocumentDiagnosticReport {
         result_id: None,
         items: errors.into_iter().map(Error::into).collect(),
     };
-    let result = serde_json::to_value(&diagnostics).unwrap();
+    let result = serde_json::to_value(&diagnostics)
+        .map_err(|err| format!("failed to serialize diagnostics: {err}"))?;
     let resp = Response {
         id,
         result: Some(result),

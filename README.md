@@ -36,6 +36,7 @@ dynamic correctness. See below for a list of currently implemented features.
   - [x] suggestions for unknown and possible misspelled keywords
 - [ ] language server protocol
   - [x] diagnostics for full sqleibniz analysis
+  - [x] apply disabled diagnostics from `leibniz.lua`
   - [ ] snippets
   - [ ] intelligent completions
 - [ ] lua scripting
@@ -175,6 +176,9 @@ Sqleibniz can be configured via a `leibniz.lua` file, this file has to be
 accessible to sqleibniz by existing at the path sqleibniz is invoked at.
 Consult [src/rules.rs](./src/rules.rs) for configuration documentation and
 [leibniz.lua](./leibniz.lua) for said example:
+
+The language server reads `disabled_rules` from the workspace `leibniz.lua`.
+Lua hooks are only executed by the CLI analysis path.
 
 ````lua
 -- this is an example configuration, consult: https://www.lua.org/manual/5.4/
@@ -325,6 +329,9 @@ multiple lines.
 ## Language Server Protocol (lsp)
 
 Sqleibniz has an LSP provider included, with in-editor diagnostics, hover info and other dx helpers.
+The language server loads `leibniz.lua` from the first workspace folder, then
+from the LSP `rootUri`, then from the current working directory. Only
+`disabled_rules` are applied in LSP mode; Lua hooks are ignored.
 
 ### Setup in Neovim
 

@@ -41,7 +41,7 @@ dynamic correctness. See below for a list of currently implemented features.
 - [ ] lua scripting
   - [x] configure sqleibniz with lua
   - [x] scripting to hook into node analysis for custom diagnostics
-  - [ ] execute hooks when encountering the defined node while analysing
+  - [x] execute hooks when encountering the defined node while analysing
 
 ### Supported Sql statements
 
@@ -140,6 +140,7 @@ Options:
           - unimplemented:             Source file contains constructs sqleibniz does not yet understand
           - unknown-keyword:           Source file contains an unknown keyword
           - bad-sqleibniz-instruction: Source file contains invalid sqleibniz instruction
+          - hook:                      User-defined Lua hook reported a diagnostic
           - sqlite-unsupported:        Source file uses sql features sqlite does not support
           - quirk:                     Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates from a stricter, conventional SQL model
           - unterminated-string:       Source file contains an unterminated string
@@ -186,6 +187,7 @@ leibniz = {
         "NoStatements",            -- source file contains no statements
         "Unimplemented",           -- construct is not implemented yet
         "BadSqleibnizInstruction", -- source file contains a bad sqleibniz instruction
+        "Hook",                    -- a user-defined Lua hook reported a diagnostic
 
         -- ignore sqlite specific diagnostics:
 
@@ -205,7 +207,7 @@ leibniz = {
             -- summarises the hooks content
             name = "idents should be lowercase",
             -- instructs sqleibniz which node to execute the `hook` for
-            node = "literal",
+            node = "Token",
             -- sqleibniz calls the hook function once it encounters a node name
             -- matching the hook.node content
             --
@@ -213,14 +215,19 @@ leibniz = {
             --
             --```
             --    node: {
+            --     node: string,
             --     kind: string,
             --     content: string,
+            --     text: string,
+            --     line: number,
+            --     start: number,
+            --     finish: number,
             --     children: node[],
             --    }
             --```
             --
             hook = function(node)
-                if node.kind == "ident" then
+                if node.kind == "Ident" then
                     if string.match(node.content, "%u") then
                         -- returing an error passes the diagnostic to sqleibniz,
                         -- thus a pretty message with the name of the hook, the
@@ -233,10 +240,10 @@ leibniz = {
         },
         {
             name = "idents shouldn't be longer than 12 characters",
-            node = "literal",
+            node = "Token",
             hook = function(node)
                 local max_size = 12
-                if node.kind == "ident" then
+                if node.kind == "Ident" then
                     if string.len(node.content) >= max_size then
                         error("idents shouldn't be longer than " .. max_size .. " characters")
                     end
@@ -283,6 +290,7 @@ warn: Ignoring the following diagnostics, as specified:
  -> NoStatements
  -> Unimplemented
  -> BadSqleibnizInstruction
+ -> Hook
 ======================== example/sqleibniz.sql =========================
 error[Syntax]: Unexpected Literal
  -> /home/teo/programming/sqleibniz/example/sqleibniz.sql:13:20

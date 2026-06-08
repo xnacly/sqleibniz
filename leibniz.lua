@@ -8,7 +8,7 @@ leibniz = {
         "NoStatements",            -- source file contains no statements
         "Unimplemented",           -- construct is not implemented yet
         "BadSqleibnizInstruction", -- source file contains a bad sqleibniz instruction
-        -- "Hook", -- a user-defined Lua hook reported a diagnostic
+        "Hook",                    -- a user-defined Lua hook reported a diagnostic
 
         -- ignore sqlite specific diagnostics:
 
@@ -28,7 +28,7 @@ leibniz = {
             -- summarises the hooks content
             name = "idents should be lowercase",
             -- instructs sqleibniz which node to execute the `hook` for
-            node = "literal",
+            node = "Token",
             -- sqleibniz calls the hook function once it encounters a node name
             -- matching the hook.node content
             --
@@ -36,14 +36,19 @@ leibniz = {
             --
             --```
             --    node: {
+            --     node: string,
             --     kind: string,
             --     content: string,
+            --     text: string,
+            --     line: number,
+            --     start: number,
+            --     finish: number,
             --     children: node[],
             --    }
             --```
             --
             hook = function(node)
-                if node.kind == "ident" then
+                if node.kind == "Ident" then
                     if string.match(node.content, "%u") then
                         -- returing an error passes the diagnostic to sqleibniz,
                         -- thus a pretty message with the name of the hook, the
@@ -56,20 +61,14 @@ leibniz = {
         },
         {
             name = "idents shouldn't be longer than 12 characters",
-            node = "literal",
+            node = "Token",
             hook = function(node)
                 local max_size = 12
-                if node.kind == "ident" then
+                if node.kind == "Ident" then
                     if string.len(node.content) >= max_size then
                         error("idents shouldn't be longer than " .. max_size .. " characters")
                     end
                 end
-            end
-        },
-        {
-            name = "hook test",
-            hook = function(node)
-                print(node.kind .. " " .. node.text .. " " .. #node.children)
             end
         }
     }

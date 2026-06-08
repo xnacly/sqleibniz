@@ -1,6 +1,6 @@
 use crate::{
     parser::nodes::*,
-    types::{Keyword, Token, Type, storage::SqliteStorageClass},
+    types::{Keyword, Token, Type, ctx::HookContext, storage::SqliteStorageClass},
 };
 
 /// impl FieldSerializable for $tt via serde_json::to_value(self).unwrap()
@@ -18,6 +18,22 @@ macro_rules! impl_field_serializable_with_serde_to_value {
 
 pub trait FieldSerializable {
     fn field_as_serializable(&self) -> serde_json::Value;
+}
+
+pub trait FieldHookContexts {
+    fn field_hook_contexts(&self) -> Vec<HookContext>;
+}
+
+macro_rules! impl_empty_field_hook_contexts {
+    ($($tt:ty),*) => {
+        $(
+            impl FieldHookContexts for $tt {
+                fn field_hook_contexts(&self) -> Vec<HookContext> {
+                    vec![]
+                }
+            }
+        )*
+    };
 }
 
 impl_field_serializable_with_serde_to_value!(
@@ -107,9 +123,21 @@ impl FieldSerializable for Token {
     }
 }
 
+impl FieldHookContexts for Token {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        vec![HookContext::token(self)]
+    }
+}
+
 impl FieldSerializable for Box<dyn Node> {
     fn field_as_serializable(&self) -> serde_json::Value {
         self.as_serializable()
+    }
+}
+
+impl FieldHookContexts for Box<dyn Node> {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        vec![self.as_hook_context()]
     }
 }
 
@@ -122,8 +150,60 @@ impl<T: FieldSerializable> FieldSerializable for Option<T> {
     }
 }
 
+impl<T: FieldHookContexts> FieldHookContexts for Option<T> {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            Some(n) => n.field_hook_contexts(),
+            None => vec![],
+        }
+    }
+}
+
 impl<T: FieldSerializable> FieldSerializable for Vec<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::Value::Array(self.iter().map(|n| n.field_as_serializable()).collect())
+    }
+}
+
+impl<T: FieldHookContexts> FieldHookContexts for Vec<T> {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        self.iter().flat_map(|n| n.field_hook_contexts()).collect()
+    }
+}
+
+impl_empty_field_hook_contexts!(
+    String,
+    bool,
+    Keyword,
+    SqliteStorageClass,
+    SchemaTableContainer
+);
+
+impl FieldHookContexts for PragmaInvocation {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            PragmaInvocation::Assign { value } | PragmaInvocation::Call { value } => {
+                value.field_hook_contexts()
+            }
+            PragmaInvocation::Query => vec![],
+        }
+    }
+}
+
+impl FieldHookContexts for ColumnConstraint {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            ColumnConstraint::Check(expr)
+            | ColumnConstraint::Default {
+                expr: Some(expr), ..
+            }
+            | ColumnConstraint::Generated { expr, .. }
+            | ColumnConstraint::As { expr, .. } => expr.field_hook_contexts(),
+            ColumnConstraint::Default {
+                literal: Some(literal),
+                ..
+            } => literal.field_hook_contexts(),
+            _ => vec![],
+        }
     }
 }

@@ -12,6 +12,8 @@ pub enum Rule {
     UnknownKeyword,
     /// Source file contains invalid sqleibniz instruction
     BadSqleibnizInstruction,
+    /// User-defined Lua hook reported a diagnostic
+    Hook,
     /// Source file uses sql features sqlite does not support
     SqliteUnsupported,
     /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
@@ -47,6 +49,7 @@ impl mlua::FromLua for Rule {
             "Syntax" => Self::Syntax,
             "Semicolon" => Self::Semicolon,
             "BadSqleibnizInstruction" => Self::BadSqleibnizInstruction,
+            "Hook" => Self::Hook,
             "UnknownKeyword" => Self::UnknownKeyword,
             "SqliteUnsupported" => Self::SqliteUnsupported,
             "Quirk" => Self::Quirk,
@@ -75,6 +78,7 @@ impl Rule {
             Self::Quirk => "Quirk",
             Self::Semicolon => "Semicolon",
             Self::BadSqleibnizInstruction => "BadSqleibnizInstruction",
+            Self::Hook => "Hook",
             Self::UnknownKeyword => "UnknownKeyword",
             Self::SqliteUnsupported => "SqliteUnsupported",
         }
@@ -96,6 +100,7 @@ impl Rule {
             Self::BadSqleibnizInstruction => {
                 "The source file contains an invalid sqleibniz instruction"
             }
+            Self::Hook => "User-defined Lua hook reported a diagnostic",
             Self::Quirk => "Sqlite or SQL quirk: https://www.sqlite.org/quirks.html",
             Self::UnknownKeyword => "Source file contains an unknown keyword",
             Self::SqliteUnsupported => "Source file uses sql features sqlite does not support",

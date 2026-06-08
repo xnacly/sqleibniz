@@ -8,6 +8,7 @@ leibniz = {
         "NoStatements",            -- source file contains no statements
         "Unimplemented",           -- construct is not implemented yet
         "BadSqleibnizInstruction", -- source file contains a bad sqleibniz instruction
+        -- "Hook", -- a user-defined Lua hook reported a diagnostic
 
         -- ignore sqlite specific diagnostics:
 

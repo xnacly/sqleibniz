@@ -163,6 +163,9 @@ Options:
       --lsp
           invoke sqleibniz as a language server
 
+      --lsp-enable-hooks
+          execute configured Lua hooks in language server diagnostics
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -178,7 +181,8 @@ Consult [src/rules.rs](./src/rules.rs) for configuration documentation and
 [leibniz.lua](./leibniz.lua) for said example:
 
 The language server reads `disabled_rules` from the workspace `leibniz.lua`.
-Lua hooks are only executed by the CLI analysis path.
+Lua hooks are only executed in LSP diagnostics when `--lsp-enable-hooks` is
+passed explicitly.
 
 ````lua
 -- this is an example configuration, consult: https://www.lua.org/manual/5.4/
@@ -331,7 +335,8 @@ multiple lines.
 Sqleibniz has an LSP provider included, with in-editor diagnostics, hover info and other dx helpers.
 The language server loads `leibniz.lua` from the first workspace folder, then
 from the LSP `rootUri`, then from the current working directory. Only
-`disabled_rules` are applied in LSP mode; Lua hooks are ignored.
+`disabled_rules` are applied in LSP mode by default. Lua hooks are ignored
+unless the server is started with `--lsp-enable-hooks`.
 
 ### Setup in Neovim
 

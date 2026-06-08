@@ -24,6 +24,23 @@ impl Default for Config {
 
 impl Config {
     pub fn from_lua_file(lua: &mlua::Lua, file_name: &str) -> Result<Self, String> {
+        let raw_conf = Self::raw_lua_config(lua, file_name)?;
+        lua.unpack(raw_conf)
+            .map_err(|err| format!("{}: {}", file_name, err))
+    }
+
+    pub fn rules_from_lua_file(lua: &mlua::Lua, file_name: &str) -> Result<Self, String> {
+        let raw_conf = Self::raw_lua_config(lua, file_name)?;
+        let table: Table = lua
+            .unpack(raw_conf)
+            .map_err(|err| format!("{}: {}", file_name, err))?;
+        Ok(Self {
+            disabled_rules: table.get("disabled_rules").unwrap_or_else(|_| vec![]),
+            hooks: None,
+        })
+    }
+
+    fn raw_lua_config(lua: &mlua::Lua, file_name: &str) -> Result<mlua::Value, String> {
         let conf_str = fs::read_to_string(file_name).map_err(|err| {
             format!(
                 "Issue trying to read configuration from '{}': [{}], falling back to default configuration",
@@ -44,13 +61,7 @@ impl Config {
                 file_name
             ));
         }
-        lua.unpack(raw_conf)
-            .map_err(|err| format!("{}: {}", file_name, err))
-    }
-
-    pub fn without_hooks(mut self) -> Self {
-        self.hooks = None;
-        self
+        Ok(raw_conf)
     }
 }
 

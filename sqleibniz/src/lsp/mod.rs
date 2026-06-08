@@ -1,7 +1,7 @@
 mod error;
 mod handlers;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use error::LspError;
 use lsp_server::{
@@ -16,8 +16,10 @@ use lsp_types::{
 };
 
 use crate::{
+    error::Error,
     lexer::Lexer,
     parser::{Parser, nodes::Node},
+    types::{config::Config, rules::Rule},
 };
 
 macro_rules! lsp_log {
@@ -95,9 +97,10 @@ fn analyze_document(text: &[u8], name: &str) -> DocumentState {
 }
 
 fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), LspError> {
-    let _params: InitializeParams = serde_json::from_value(params)
+    let params: InitializeParams = serde_json::from_value(params)
         .map_err(|err| format!("failed to parse initialize params: {err}"))?;
     lsp_log!("starting event loop");
+    let config = load_config(&params);
     let mut documents = HashMap::<String, DocumentState>::new();
     for msg in &connection.receiver {
         match msg {
@@ -137,7 +140,9 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 let state = documents.get(&params.text_document.uri.to_string());
                                 if let Err(e) = handlers::diagnostic::handle(
                                     &connection,
-                                    state.map(|s| s.errors.clone()).unwrap_or_default(),
+                                    state
+                                        .map(|s| filter_errors(&s.errors, &config.disabled_rules))
+                                        .unwrap_or_default(),
                                     id,
                                     params,
                                 ) {
@@ -196,6 +201,54 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
     Ok(())
 }
 
+fn load_config(params: &InitializeParams) -> Config {
+    let path = config_path(params);
+    let lua = mlua::Lua::new();
+    match Config::rules_from_lua_file(&lua, &path.to_string_lossy()) {
+        Ok(config) => {
+            eprintln!("[sqleibniz]: loaded config from {}", path.display());
+            config
+        }
+        Err(err) => {
+            eprintln!("[sqleibniz]: {err}");
+            Config::default()
+        }
+    }
+}
+
+fn config_path(params: &InitializeParams) -> PathBuf {
+    if let Some(workspace) = params
+        .workspace_folders
+        .as_ref()
+        .and_then(|workspaces| workspaces.first())
+        .and_then(|workspace| uri_file_path(&workspace.uri))
+    {
+        return workspace.join("leibniz.lua");
+    }
+
+    #[allow(deprecated)]
+    let root_uri = params.root_uri.as_ref();
+    if let Some(root) = root_uri.and_then(uri_file_path) {
+        return root.join("leibniz.lua");
+    }
+
+    PathBuf::from("leibniz.lua")
+}
+
+fn uri_file_path(uri: &lsp_types::Uri) -> Option<PathBuf> {
+    uri.to_string()
+        .strip_prefix("file://")
+        .map(|path| PathBuf::from(path.replace("%20", " ")))
+}
+
+fn filter_errors(errors: &[Error], disabled_rules: &[Rule]) -> Vec<Error> {
+    errors
+        .iter()
+        .filter(|error| !disabled_rules.contains(&error.rule))
+        .cloned()
+        .collect()
+}
+
 fn send_request_error(
     connection: &Connection,
     id: RequestId,
@@ -240,4 +293,32 @@ where
     N::Params: serde::de::DeserializeOwned,
 {
     not.extract(N::METHOD)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{error::Error, lsp::filter_errors, types::rules::Rule};
+
+    fn error(rule: Rule) -> Error {
+        Error {
+            file: "test.sql".into(),
+            line: 0,
+            rule,
+            note: "note".into(),
+            msg: "msg".into(),
+            start: 0,
+            end: 1,
+            improved_line: None,
+            doc_url: None,
+        }
+    }
+
+    #[test]
+    fn disabled_rules_are_filtered_from_lsp_diagnostics() {
+        let errors = vec![error(Rule::Syntax), error(Rule::Hook)];
+
+        let filtered = filter_errors(&errors, &[Rule::Hook]);
+
+        assert_eq!(filtered, vec![error(Rule::Syntax)]);
+    }
 }

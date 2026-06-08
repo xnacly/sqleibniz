@@ -17,9 +17,13 @@ use lsp_types::{
 
 use crate::{
     error::Error,
+    hooks,
     lexer::Lexer,
     parser::{Parser, nodes::Node},
-    types::{config::Config, rules::Rule},
+    types::{
+        config::{Config, Hook},
+        rules::Rule,
+    },
 };
 
 macro_rules! lsp_log {
@@ -28,7 +32,7 @@ macro_rules! lsp_log {
     };
 }
 
-pub fn start() -> Result<(), LspError> {
+pub fn start(enable_hooks: bool) -> Result<(), LspError> {
     lsp_log!("starting language server");
     let (connection, threads) = Connection::stdio();
     let capabilities = serde_json::to_value(&ServerCapabilities {
@@ -68,7 +72,7 @@ pub fn start() -> Result<(), LspError> {
         }
     };
 
-    event_loop(connection, init_params)?;
+    event_loop(connection, init_params, enable_hooks)?;
 
     threads
         .join()
@@ -84,23 +88,35 @@ struct DocumentState {
     errors: Vec<super::error::Error>,
 }
 
-fn analyze_document(text: &[u8], name: &str) -> DocumentState {
+fn analyze_document(text: &[u8], name: &str, hooks: Option<&[Hook]>) -> DocumentState {
     let text = text.to_vec();
     let mut l = Lexer::new(&text, name);
     let tokens = l.run();
     let mut errors = l.errors;
-    let mut p = Parser::new(tokens, name);
+    let mut p = Parser::new(tokens.clone(), name);
     let ast = p.parse();
     errors.append(&mut p.errors);
+    if let Some(hooks) = hooks {
+        errors.append(&mut hooks::run(name, hooks, &ast, &tokens));
+    }
 
     DocumentState { ast, errors }
 }
 
-fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), LspError> {
+struct LspConfig {
+    config: Config,
+    _lua: Option<mlua::Lua>,
+}
+
+fn event_loop(
+    connection: Connection,
+    params: serde_json::Value,
+    enable_hooks: bool,
+) -> Result<(), LspError> {
     let params: InitializeParams = serde_json::from_value(params)
         .map_err(|err| format!("failed to parse initialize params: {err}"))?;
     lsp_log!("starting event loop");
-    let config = load_config(&params);
+    let config = load_config(&params, enable_hooks);
     let mut documents = HashMap::<String, DocumentState>::new();
     for msg in &connection.receiver {
         match msg {
@@ -141,7 +157,9 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 if let Err(e) = handlers::diagnostic::handle(
                                     &connection,
                                     state
-                                        .map(|s| filter_errors(&s.errors, &config.disabled_rules))
+                                        .map(|s| {
+                                            filter_errors(&s.errors, &config.config.disabled_rules)
+                                        })
                                         .unwrap_or_default(),
                                     id,
                                     params,
@@ -171,7 +189,11 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 let formatted_path = uri.replace("file://", "");
                                 documents.insert(
                                     uri,
-                                    analyze_document(change.text.as_bytes(), &formatted_path),
+                                    analyze_document(
+                                        change.text.as_bytes(),
+                                        &formatted_path,
+                                        config.config.hooks.as_deref(),
+                                    ),
                                 );
                             }
                         }
@@ -188,6 +210,7 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                                 analyze_document(
                                     params.text_document.text.as_bytes(),
                                     &formatted_path,
+                                    config.config.hooks.as_deref(),
                                 ),
                             );
                         }
@@ -201,17 +224,29 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
     Ok(())
 }
 
-fn load_config(params: &InitializeParams) -> Config {
+fn load_config(params: &InitializeParams, enable_hooks: bool) -> LspConfig {
     let path = config_path(params);
     let lua = mlua::Lua::new();
-    match Config::rules_from_lua_file(&lua, &path.to_string_lossy()) {
+    let loaded_config = if enable_hooks {
+        Config::from_lua_file(&lua, &path.to_string_lossy())
+    } else {
+        Config::rules_from_lua_file(&lua, &path.to_string_lossy())
+    };
+
+    match loaded_config {
         Ok(config) => {
             eprintln!("[sqleibniz]: loaded config from {}", path.display());
-            config
+            LspConfig {
+                config,
+                _lua: enable_hooks.then_some(lua),
+            }
         }
         Err(err) => {
             eprintln!("[sqleibniz]: {err}");
-            Config::default()
+            LspConfig {
+                config: Config::default(),
+                _lua: None,
+            }
         }
     }
 }
@@ -298,6 +333,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{error::Error, lsp::filter_errors, types::rules::Rule};
+    use crate::{lsp::analyze_document, types::config::Hook};
 
     fn error(rule: Rule) -> Error {
         Error {
@@ -320,5 +356,43 @@ mod tests {
         let filtered = filter_errors(&errors, &[Rule::Hook]);
 
         assert_eq!(filtered, vec![error(Rule::Syntax)]);
+    }
+
+    #[test]
+    fn hooks_run_only_when_supplied_to_lsp_analysis() {
+        let lua = mlua::Lua::new();
+        let hook_fn = lua
+            .load(
+                r#"
+                return function(node)
+                    if node.kind == "Ident" and string.match(node.content, "%u") then
+                        error("ident should be lowercase")
+                    end
+                end
+            "#,
+            )
+            .eval()
+            .unwrap();
+        let hooks = vec![Hook {
+            name: "idents should be lowercase".into(),
+            node: Some("Token".into()),
+            hook: Some(hook_fn),
+        }];
+
+        let without_hooks = analyze_document(b"VACUUM UpperName;", "test.sql", None);
+        let with_hooks = analyze_document(b"VACUUM UpperName;", "test.sql", Some(&hooks));
+
+        assert!(
+            !without_hooks
+                .errors
+                .iter()
+                .any(|error| error.rule == Rule::Hook)
+        );
+        assert!(
+            with_hooks
+                .errors
+                .iter()
+                .any(|error| error.rule == Rule::Hook)
+        );
     }
 }

@@ -9,10 +9,7 @@ use sqleibniz::error::{self, Error, print_str_colored, warn};
 use sqleibniz::highlight::builder;
 use sqleibniz::lexer::Lexer;
 use sqleibniz::parser;
-use sqleibniz::parser::nodes::Node;
-use sqleibniz::types::Token;
-use sqleibniz::types::config::{Config, Hook};
-use sqleibniz::types::ctx::HookContext;
+use sqleibniz::types::config::Config;
 use sqleibniz::types::rules::Rule;
 
 /// LSP and analysis cli for sql. Check for valid syntax, semantics and perform dynamic analysis.
@@ -58,6 +55,9 @@ struct Cli {
     /// invoke sqleibniz as a language server
     #[arg(long, conflicts_with = "sarif")]
     lsp: bool,
+    /// execute configured Lua hooks in language server diagnostics
+    #[arg(long, requires = "lsp")]
+    lsp_enable_hooks: bool,
     // TODO: add a --doc <fuzzy ast node / ast name> to print node documentation
 }
 
@@ -68,67 +68,11 @@ struct FileResult {
     diagnostics: Vec<Error>,
 }
 
-fn hook_error_note(err: mlua::Error) -> String {
-    match err {
-        mlua::Error::RuntimeError(msg) => msg,
-        mlua::Error::CallbackError { cause, .. } => cause.to_string(),
-        err => err.to_string(),
-    }
-}
-
-fn hook_error(file: &str, hook: &Hook, ctx: &HookContext, err: mlua::Error) -> Error {
-    Error {
-        file: file.into(),
-        line: ctx.line,
-        rule: Rule::Hook,
-        note: hook_error_note(err),
-        msg: hook.name.clone(),
-        start: ctx.start,
-        end: ctx.finish,
-        improved_line: None,
-        doc_url: None,
-    }
-}
-
-fn hook_matches(hook: &Hook, ctx: &HookContext) -> bool {
-    hook.node
-        .as_deref()
-        .is_none_or(|node| node == ctx.node.as_str())
-}
-
-fn run_hook_context(file: &str, hooks: &[Hook], ctx: &HookContext, errors: &mut Vec<Error>) {
-    for hook in hooks {
-        if hook_matches(hook, ctx) {
-            if let Err(err) = hook.exec(ctx.clone()) {
-                errors.push(hook_error(file, hook, ctx, err));
-            }
-        }
-    }
-
-    for child in &ctx.children {
-        run_hook_context(file, hooks, child, errors);
-    }
-}
-
-fn run_hooks(file: &str, hooks: &[Hook], ast: &[Box<dyn Node>], tokens: &[Token]) -> Vec<Error> {
-    let mut errors = vec![];
-
-    for node in ast {
-        run_hook_context(file, hooks, &node.as_hook_context(), &mut errors);
-    }
-
-    for token in tokens {
-        run_hook_context(file, hooks, &HookContext::token(token), &mut errors);
-    }
-
-    errors
-}
-
 fn main() {
     let args = Cli::parse();
 
     if args.lsp {
-        if let Err(e) = sqleibniz::lsp::start() {
+        if let Err(e) = sqleibniz::lsp::start(args.lsp_enable_hooks) {
             panic!("fatal error in language server: {}", e);
         }
         return;
@@ -253,7 +197,7 @@ fn main() {
             errors.append(&mut parser.errors);
 
             if let Some(hooks) = config.hooks.as_deref() {
-                errors.append(&mut run_hooks(&file.name, hooks, &ast, &toks));
+                errors.append(&mut sqleibniz::hooks::run(&file.name, hooks, &ast, &toks));
             }
         }
 

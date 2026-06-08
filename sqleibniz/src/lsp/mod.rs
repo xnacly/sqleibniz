@@ -1,6 +1,8 @@
 mod error;
 mod handlers;
 
+use std::collections::HashMap;
+
 use error::LspError;
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId};
 use lsp_types::{
@@ -71,11 +73,28 @@ pub fn start() -> Result<(), LspError> {
     Ok(())
 }
 
+#[derive(Default)]
+struct DocumentState {
+    ast: Vec<Box<dyn Node>>,
+    errors: Vec<super::error::Error>,
+}
+
+fn analyze_document(text: &[u8], name: &str) -> DocumentState {
+    let text = text.to_vec();
+    let mut l = Lexer::new(&text, name);
+    let tokens = l.run();
+    let mut errors = l.errors;
+    let mut p = Parser::new(tokens, name);
+    let ast = p.parse();
+    errors.append(&mut p.errors);
+
+    DocumentState { ast, errors }
+}
+
 fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), LspError> {
     let _params: InitializeParams = serde_json::from_value(params).unwrap();
     lsp_log!("starting event loop");
-    let mut ast: Vec<Box<dyn Node>> = vec![];
-    let mut errors: Vec<super::error::Error> = vec![];
+    let mut documents = HashMap::<String, DocumentState>::new();
     for msg in &connection.receiver {
         eprintln!("got msg: {msg:?}");
         match msg {
@@ -88,9 +107,19 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                     "textDocument/hover" => {
                         match cast::<HoverRequest>(req) {
                             Ok((id, params)) => {
-                                if let Err(e) =
-                                    handlers::hover::handle(&connection, &ast, id, params)
-                                {
+                                let state = documents.get(
+                                    &params
+                                        .text_document_position_params
+                                        .text_document
+                                        .uri
+                                        .to_string(),
+                                );
+                                if let Err(e) = handlers::hover::handle(
+                                    &connection,
+                                    state.map(|s| s.ast.as_slice()),
+                                    id,
+                                    params,
+                                ) {
                                     eprintln!("[sqleibniz]: err: {}", e);
                                 }
                                 continue;
@@ -101,9 +130,10 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                     "textDocument/diagnostic" => {
                         match cast::<DocumentDiagnosticRequest>(req) {
                             Ok((id, params)) => {
+                                let state = documents.get(&params.text_document.uri.to_string());
                                 if let Err(e) = handlers::diagnostic::handle(
                                     &connection,
-                                    errors.clone(),
+                                    state.map(|s| s.errors.clone()).unwrap_or_default(),
                                     id,
                                     params,
                                 ) {
@@ -125,15 +155,14 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                 "textDocument/didChange" => {
                     match cast_noti::<DidChangeTextDocument>(not) {
                         Ok(params) => {
-                            let text = &(params.content_changes[0].text.clone().into_bytes());
-                            let formatted_path =
-                                params.text_document.uri.to_string().replace("file://", "");
-                            let mut l = Lexer::new(text, &formatted_path);
-                            let tokens = l.run();
-                            errors = l.errors;
-                            let mut p = Parser::new(tokens, &formatted_path);
-                            ast = p.parse();
-                            errors.append(&mut p.errors);
+                            if let Some(change) = params.content_changes.first() {
+                                let uri = params.text_document.uri.to_string();
+                                let formatted_path = uri.replace("file://", "");
+                                documents.insert(
+                                    uri,
+                                    analyze_document(change.text.as_bytes(), &formatted_path),
+                                );
+                            }
                         }
                         Err(err) => panic!("failed to cast notification: {err:?}"),
                     };
@@ -141,15 +170,15 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> Result<(), L
                 "textDocument/didOpen" => {
                     match cast_noti::<DidOpenTextDocument>(not) {
                         Ok(params) => {
-                            let text = &(params.text_document.text.into_bytes());
-                            let formatted_path =
-                                params.text_document.uri.to_string().replace("file://", "");
-                            let mut l = Lexer::new(text, &formatted_path);
-                            let tokens = l.run();
-                            errors = l.errors;
-                            let mut p = Parser::new(tokens, &formatted_path);
-                            ast = p.parse();
-                            errors.append(&mut p.errors);
+                            let uri = params.text_document.uri.to_string();
+                            let formatted_path = uri.replace("file://", "");
+                            documents.insert(
+                                uri,
+                                analyze_document(
+                                    params.text_document.text.as_bytes(),
+                                    &formatted_path,
+                                ),
+                            );
                         }
                         Err(err) => panic!("failed to cast notification: {err:?}"),
                     };

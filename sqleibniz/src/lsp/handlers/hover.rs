@@ -14,8 +14,8 @@ pub fn handle(
         .unwrap_or_default()
         .iter()
         .filter(|n| {
-            let tok = n.token();
-            tok.line == line as usize && tok.start <= character as usize
+            let location = n.location();
+            location.line == line as usize && location.start <= character as usize
         })
         .next_back()
     {

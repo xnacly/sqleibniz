@@ -11,15 +11,36 @@ pub struct ImprovedLine {
     pub start: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Location {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Location {
+    pub fn new(line: usize, start: usize, end: usize) -> Self {
+        Self { line, start, end }
+    }
+}
+
+impl From<&Token> for Location {
+    fn from(token: &Token) -> Self {
+        Self {
+            line: token.line,
+            start: token.start,
+            end: token.end,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Error {
     pub file: String,
-    pub line: usize,
+    pub location: Location,
     pub rule: Rule,
     pub note: String,
     pub msg: String,
-    pub start: usize,
-    pub end: usize,
     pub improved_line: Option<ImprovedLine>,
     pub doc_url: Option<&'static str>,
 }
@@ -80,6 +101,29 @@ pub fn print_str_colored(b: &mut builder::Builder, s: &str, c: Color) {
 }
 
 impl Error {
+    pub fn new(
+        file: impl Into<String>,
+        location: impl Into<Location>,
+        rule: Rule,
+        msg: impl Into<String>,
+        note: impl Into<String>,
+    ) -> Self {
+        Self {
+            file: file.into(),
+            location: location.into(),
+            rule,
+            note: note.into(),
+            msg: msg.into(),
+            improved_line: None,
+            doc_url: None,
+        }
+    }
+
+    pub fn with_doc_url(mut self, doc_url: &'static str) -> Self {
+        self.doc_url = Some(doc_url);
+        self
+    }
+
     pub fn print(&mut self, b: &mut builder::Builder, content: &[u8], tokens: &[Token]) {
         print_str_colored(b, "error", Color::Red);
         b.write_char('[');
@@ -102,7 +146,7 @@ impl Error {
         // zero based indexing, we need human friendly numbers here
         print_str_colored(
             b,
-            &format!(":{}:{}", self.line + 1, self.start + 1),
+            &format!(":{}:{}", self.location.line + 1, self.location.start + 1),
             Color::Yellow,
         );
         b.write_char('\n');
@@ -111,12 +155,12 @@ impl Error {
 
         // eof should always highlight the last line
         if let &Rule::NoStatements = &self.rule {
-            self.line = lines.len() - 1;
-            self.end = 0;
+            self.location.line = lines.len() - 1;
+            self.location.end = 0;
         }
 
-        let start_line = self.line.saturating_sub(2);
-        let end_line = usize::min(self.line + 2, lines.len() - 1);
+        let start_line = self.location.line.saturating_sub(2);
+        let end_line = usize::min(self.location.line + 2, lines.len() - 1);
 
         for (i, line) in lines.iter().enumerate().take(end_line + 1).skip(start_line) {
             print_str_colored(b, &format!(" {:02} | ", i + 1), Color::Blue);
@@ -124,9 +168,9 @@ impl Error {
             highlight(b, &line_tokens, line);
             b.write_char('\n');
 
-            if i == self.line {
-                let repeat = if self.end > self.start {
-                    self.end - self.start
+            if i == self.location.line {
+                let repeat = if self.location.end > self.location.start {
+                    self.location.end - self.location.start
                 } else {
                     1
                 };
@@ -136,7 +180,7 @@ impl Error {
                     b,
                     &format!(
                         "{}{} error occurs here.\n",
-                        " ".repeat(self.start),
+                        " ".repeat(self.location.start),
                         "~".repeat(repeat)
                     ),
                     Color::Red,

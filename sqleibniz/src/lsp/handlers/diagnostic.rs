@@ -6,12 +6,12 @@ use crate::{error::Error, lsp::error::LspError};
 fn error_range(error: &Error) -> Range {
     Range::new(
         Position {
-            line: error.line as u32,
-            character: error.start as u32,
+            line: error.location.line as u32,
+            character: error.location.start as u32,
         },
         Position {
-            line: error.line as u32,
-            character: usize::max(error.end, error.start + 1) as u32,
+            line: error.location.line as u32,
+            character: usize::max(error.location.end, error.location.start + 1) as u32,
         },
     )
 }
@@ -60,20 +60,24 @@ pub fn handle(
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::Error, lsp::handlers::diagnostic::error_range, types::rules::Rule};
+    use crate::{
+        error::{Error, Location},
+        lsp::handlers::diagnostic::error_range,
+        types::rules::Rule,
+    };
 
     fn error(start: usize, end: usize) -> Error {
-        Error {
-            file: "test.sql".into(),
-            line: 2,
-            rule: Rule::Syntax,
-            note: "note".into(),
-            msg: "msg".into(),
-            start,
-            end,
-            improved_line: None,
-            doc_url: None,
-        }
+        Error::new(
+            "test.sql",
+            Location {
+                line: 2,
+                start,
+                end,
+            },
+            Rule::Syntax,
+            "msg",
+            "note",
+        )
     }
 
     #[test]

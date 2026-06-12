@@ -339,24 +339,28 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::Error, lsp::filter_errors, types::rules::Rule};
+    use crate::{
+        error::{Error, Location},
+        lsp::filter_errors,
+        types::rules::Rule,
+    };
     use crate::{
         lsp::analyze_document,
         types::config::{Hook, HookMatch},
     };
 
     fn error(rule: Rule) -> Error {
-        Error {
-            file: "test.sql".into(),
-            line: 0,
+        Error::new(
+            "test.sql",
+            Location {
+                line: 0,
+                start: 0,
+                end: 1,
+            },
             rule,
-            note: "note".into(),
-            msg: "msg".into(),
-            start: 0,
-            end: 1,
-            improved_line: None,
-            doc_url: None,
-        }
+            "msg",
+            "note",
+        )
     }
 
     #[test]

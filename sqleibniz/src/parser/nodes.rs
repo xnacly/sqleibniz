@@ -1,3 +1,4 @@
+use crate::error::Location;
 use crate::parser::debug::{FieldHookContexts, FieldSerializable};
 use crate::types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass};
 
@@ -22,21 +23,21 @@ macro_rules! node {
         #[derive(Debug)]
         #[doc = $documentation]
         pub struct $node_name {
-            /// predefined for all structures defined with the node! macro, holds the token of the ast node
-            pub t: Token,
+            /// Source location for this AST node.
+            pub location: Location,
             $(
                 pub $field_name: $field_type,
             )*
         }
 
         impl Node for $node_name {
-            fn token(&self) -> &Token {
-                &self.t
+            fn location(&self) -> Location {
+                self.location
             }
 
             #[cfg(feature = "trace")]
             fn display(&self, indent: usize) {
-                print!("{}- {}({:?})", " ".repeat(indent), self.name(), self.t.ttype);
+                print!("{}- {}({:?})", " ".repeat(indent), self.name(), self.location);
                 $(
                     print!(" [{}={:?}] ", stringify!($field_name), self.$field_name);
                 )*
@@ -65,9 +66,9 @@ macro_rules! node {
                     node: stringify!($node_name).into(),
                     kind: stringify!($node_name).into(),
                     content: None,
-                    line: self.t.line,
-                    start: self.t.start,
-                    finish: self.t.end,
+                    line: self.location.line,
+                    start: self.location.start,
+                    finish: self.location.end,
                     children,
                 }
             }
@@ -81,8 +82,7 @@ macro_rules! node {
         impl $node_name {
             pub fn new($($field_name: $field_type,)*) -> Self {
                 Self {
-                    // Type::InstructionExpect is always used in tests
-                    t: Token::new(crate::types::Type::InstructionExpect),
+                    location: Location::new(0, 0, 0),
                     $($field_name,)*
                 }
             }
@@ -103,7 +103,7 @@ macro_rules! node {
 }
 
 pub trait Node: std::fmt::Debug {
-    fn token(&self) -> &Token;
+    fn location(&self) -> Location;
     #[cfg(feature = "trace")]
     fn display(&self, indent: usize);
     fn name(&self) -> &str;
@@ -125,6 +125,7 @@ node!(
 A literal value represents a constant. Literal values may be integers, floating point numbers, strings, BLOBs, or NULLs.
 Which kind a literal is, is encoded in the Nodes token.
 ",
+    value: Token
 );
 
 node!(
@@ -521,6 +522,24 @@ node!(
     // equivalent to type_name: https://www.sqlite.org/syntax/type-name.html
     type_name: Option<SqliteStorageClass>,
     constraints: Vec<ColumnConstraint>
+);
+
+node!(
+    CreateTable,
+    r"CREATE TABLE statement, see: https://www.sqlite.org/lang_createtable.html
+
+The CREATE TABLE command creates a new table in an SQLite database. This node represents the
+column-list form:
+
+```sql
+CREATE TABLE table_name (column_def, ...);
+CREATE TEMP TABLE IF NOT EXISTS schema.table_name (column_def, ...);
+```
+",
+    temporary: bool,
+    if_not_exists: bool,
+    name: SchemaTableContainer,
+    columns: Vec<ColumnDef>
 );
 
 #[derive(Debug, serde::Serialize)]

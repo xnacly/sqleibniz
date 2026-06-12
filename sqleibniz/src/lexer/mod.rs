@@ -1,6 +1,6 @@
 use std::f64;
 
-use crate::error::{self, Error, ImprovedLine};
+use crate::error::{self, Error, ImprovedLine, Location};
 use crate::types::{Keyword, Token, Type, rules::Rule};
 
 mod tests;
@@ -37,17 +37,17 @@ impl<'a> Lexer<'a> {
     }
 
     fn err(&self, msg: &str, note: &str, start: usize, rule: Rule) -> Error {
-        Error {
-            improved_line: None,
-            file: self.name.to_string(),
-            line: self.line,
+        Error::new(
+            self.name,
+            Location {
+                line: self.line,
+                start,
+                end: self.line_pos,
+            },
             rule,
-            note: note.into(),
-            msg: msg.into(),
-            start,
-            end: self.line_pos,
-            doc_url: None,
-        }
+            msg,
+            note,
+        )
     }
 
     fn next_is(&mut self, c: char) -> bool {
@@ -110,13 +110,13 @@ impl<'a> Lexer<'a> {
                     line_start,
                     Rule::UnterminatedString,
                 );
-                err.end += 1;
-                err.line = line;
+                err.location.end += 1;
+                err.location.line = line;
                 err.doc_url =
                     Some("https://www.sqlite.org/lang_expr.html#literal_values_constants_");
                 err.improved_line = Some(ImprovedLine {
                     snippet: "'",
-                    start: err.end,
+                    start: err.location.end,
                 });
                 return Err(Box::new(err));
             } else if self.is('\'') {
@@ -219,8 +219,8 @@ impl<'a> Lexer<'a> {
                                             "`{}` is not a valid sqleibniz instruction",
                                             function
                                         );
-                                        err.start = start - 1;
-                                        err.end = self.pos;
+                                        err.location.start = start - 1;
+                                        err.location.end = self.pos;
                                         self.errors.push(err);
                                     }
                                 }
@@ -229,8 +229,8 @@ impl<'a> Lexer<'a> {
                                     "`{}` is not a valid sqleibniz instruction",
                                     instruction
                                 );
-                                err.start = start - 1;
-                                err.end = self.pos;
+                                err.location.start = start - 1;
+                                err.location.end = self.pos;
                                 self.errors.push(err);
                             }
 
@@ -371,7 +371,7 @@ impl<'a> Lexer<'a> {
                                 for (idx, c) in str.chars().enumerate() {
                                     if !c.is_ascii_hexdigit() {
                                         let mut err = self.err("Bad blob data", &format!("a Blob is hexadecimal data, '{}' is not valid hex (a..=f, A..=F, 0..=9)", c), line_start+2+idx, Rule::InvalidBlob);
-                                        err.end = line_start + 2 + idx;
+                                        err.location.end = line_start + 2 + idx;
                                         err.doc_url = Some(
                                             "https://www.sqlite.org/lang_expr.html#literal_values_constants_",
                                         );
@@ -397,7 +397,7 @@ impl<'a> Lexer<'a> {
                                 line_start,
                                 Rule::InvalidBlob,
                             );
-                            err.line = line;
+                            err.location.line = line;
                             err.doc_url = Some(
                                 "https://www.sqlite.org/lang_expr.html#literal_values_constants_",
                             );

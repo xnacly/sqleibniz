@@ -231,9 +231,9 @@ fn main() {
                         e.rule.name(),
                         e.msg,
                         e.note,
-                        e.line,
-                        e.start,
-                        e.end
+                        e.location.line,
+                        e.location.start,
+                        e.location.end
                     );
                 } else {
                     e.print(&mut error_string_builder, &content, &toks);

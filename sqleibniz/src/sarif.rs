@@ -45,7 +45,7 @@ fn rule_descriptor(rule: &Rule) -> Value {
 }
 
 fn result(error: &Error) -> Value {
-    let end_column = usize::max(error.end + 1, error.start + 2);
+    let end_column = usize::max(error.location.end + 1, error.location.start + 2);
     let message = if error.note.is_empty() {
         Cow::Borrowed(error.msg.as_str())
     } else {
@@ -64,8 +64,8 @@ fn result(error: &Error) -> Value {
                     "uri": error.file.as_str(),
                 },
                 "region": {
-                    "startLine": error.line + 1,
-                    "startColumn": error.start + 1,
+                    "startLine": error.location.line + 1,
+                    "startColumn": error.location.start + 1,
                     "endColumn": end_column,
                 }
             }
@@ -84,20 +84,22 @@ fn result(error: &Error) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Location;
 
     #[test]
     fn emits_sarif_log_with_result_location() {
-        let error = Error {
-            file: "example.sql".into(),
-            line: 2,
-            rule: Rule::Syntax,
-            note: "expected semicolon".into(),
-            msg: "Unexpected Literal".into(),
-            start: 4,
-            end: 4,
-            improved_line: None,
-            doc_url: Some("https://sqlite.org/lang.html"),
-        };
+        let error = Error::new(
+            "example.sql",
+            Location {
+                line: 2,
+                start: 4,
+                end: 4,
+            },
+            Rule::Syntax,
+            "Unexpected Literal",
+            "expected semicolon",
+        )
+        .with_doc_url("https://sqlite.org/lang.html");
 
         let log = log(&[error]);
 

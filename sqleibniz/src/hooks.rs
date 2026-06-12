@@ -1,5 +1,5 @@
 use crate::{
-    error::Error,
+    error::{Error, Location},
     parser::nodes::Node,
     types::{Token, config::Hook, ctx::HookContext, rules::Rule},
 };
@@ -14,17 +14,17 @@ fn hook_error_note(err: mlua::Error) -> String {
 }
 
 fn hook_error(file: &str, hook: &Hook, ctx: &HookContext, err: mlua::Error) -> Error {
-    Error {
-        file: file.into(),
-        line: ctx.line,
-        rule: Rule::Hook,
-        note: hook_error_note(err),
-        msg: hook.name.clone(),
-        start: ctx.start,
-        end: ctx.finish,
-        improved_line: None,
-        doc_url: None,
-    }
+    Error::new(
+        file,
+        Location {
+            line: ctx.line,
+            start: ctx.start,
+            end: ctx.finish,
+        },
+        Rule::Hook,
+        hook.name.clone(),
+        hook_error_note(err),
+    )
 }
 
 fn hook_diagnostic(
@@ -33,17 +33,17 @@ fn hook_diagnostic(
     node: mlua::Table,
     note: String,
 ) -> mlua::Result<Error> {
-    Ok(Error {
-        file: file.into(),
-        line: node.get("line")?,
-        rule: Rule::Hook,
+    Ok(Error::new(
+        file,
+        Location {
+            line: node.get("line")?,
+            start: node.get("start")?,
+            end: node.get("finish")?,
+        },
+        Rule::Hook,
+        hook_name,
         note,
-        msg: hook_name.into(),
-        start: node.get("start")?,
-        end: node.get("finish")?,
-        improved_line: None,
-        doc_url: None,
-    })
+    ))
 }
 
 fn hook_matches(hook: &Hook, ctx: &HookContext) -> bool {

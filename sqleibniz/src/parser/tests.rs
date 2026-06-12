@@ -220,6 +220,63 @@ mod should_pass {
     }
 
     test_group_pass_assert! {
+        create_table_stmt,
+
+        create_table_single_column:
+        r"CREATE TABLE users (id INTEGER);"=
+        vec![CreateTable::new(
+            false,
+            false,
+            SchemaTableContainer::Table("users".into()),
+            vec![ColumnDef::new("id".into(), Some(SqliteStorageClass::Integer), vec![])],
+        )],
+
+        create_temp_table_if_not_exists:
+        r"CREATE TEMP TABLE IF NOT EXISTS main.users (id INTEGER PRIMARY KEY, name TEXT);"=
+        vec![CreateTable::new(
+            true,
+            true,
+            SchemaTableContainer::SchemaAndTable {
+                schema: "main".into(),
+                table: "users".into(),
+            },
+            vec![
+                ColumnDef::new(
+                    "id".into(),
+                    Some(SqliteStorageClass::Integer),
+                    vec![ColumnConstraint::PrimaryKey {
+                        asc_desc: None,
+                        on_conflict: None,
+                        autoincrement: false,
+                    }],
+                ),
+                ColumnDef::new("name".into(), Some(SqliteStorageClass::Text), vec![]),
+            ],
+        )],
+
+        create_table_foreign_key_column:
+        r"CREATE TABLE users (team_id INTEGER REFERENCES teams);"=
+        vec![CreateTable::new(
+            false,
+            false,
+            SchemaTableContainer::Table("users".into()),
+            vec![ColumnDef::new(
+                "team_id".into(),
+                Some(SqliteStorageClass::Integer),
+                vec![ColumnConstraint::ForeignKey(ForeignKeyClause {
+                    foreign_table: "teams".into(),
+                    references_columns: vec![],
+                    on_delete: None,
+                    on_update: None,
+                    match_type: None,
+                    deferrable: false,
+                    initially_deferred: false,
+                })],
+            )],
+        )]
+    }
+
+    test_group_pass_assert! {
         alter_stmt,
 
         alter_rename_to: r"ALTER TABLE schema.table_name RENAME TO new_table;"=vec![
@@ -334,6 +391,23 @@ mod should_pass {
             None,
         )],
 
+        named_primary_key:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CONSTRAINT pk PRIMARY KEY;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::PrimaryKey {
+                    asc_desc: None,
+                    on_conflict: None,
+                    autoincrement: false,
+                }],
+            )),
+            None,
+        )],
+
         primary_key_desc_conflict_replace_autoincrement:
         r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT PRIMARY KEY DESC ON CONFLICT REPLACE AUTOINCREMENT;"=
         vec![Alter::new(
@@ -416,8 +490,28 @@ mod should_pass {
                 vec![ColumnConstraint::Default {
                     expr: None,
                     literal: Some(Literal {
-                        t: Token::new(Type::String("literal".into()))
+                        location: crate::error::Location::new(0, 0, 0),
+                        value: Token::new(Type::String("literal".into())),
                     }),
+                }],
+            )),
+            None,
+        )],
+
+        default_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT DEFAULT ('literal');"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Default {
+                    expr: Some(Expr::new(
+                        Some(Token::new(Type::String("literal".into()))),
+                        None, None, None, None
+                    )),
+                    literal: None,
                 }],
             )),
             None,
@@ -454,6 +548,25 @@ mod should_pass {
                         None, None, None, None
                     ),
                     stored_virtual: Some(Keyword::STORED),
+                }],
+            )),
+            None,
+        )],
+
+        generated_virtual:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT GENERATED ALWAYS AS ('literal') VIRTUAL;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Generated {
+                    expr: Expr::new(
+                        Some(Token::new(Type::String("literal".into()))),
+                        None, None, None, None
+                    ),
+                    stored_virtual: Some(Keyword::VIRTUAL),
                 }],
             )),
             None,
@@ -498,6 +611,27 @@ mod should_pass {
                     match_type: None,
                     deferrable: false,
                     initially_deferred: false,
+                })],
+            )),
+            None,
+        )],
+
+        references_columns_on_update_match_deferrable:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table (foreign_column) ON UPDATE CASCADE MATCH FULL DEFERRABLE INITIALLY DEFERRED;"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::ForeignKey(ForeignKeyClause {
+                    foreign_table: "foreign_table".into(),
+                    references_columns: vec!["foreign_column".into()],
+                    on_delete: None,
+                    on_update: Some(ForeignKeyAction::Cascade),
+                    match_type: Some(ForeignKeyMatch::Full),
+                    deferrable: true,
+                    initially_deferred: true,
                 })],
             )),
             None,
@@ -558,6 +692,38 @@ macro_rules! test_group_fail {
     };
 }
 
+#[allow(unused_macros)]
+macro_rules! test_group_fail_assert {
+    ($group_name:ident,$($ident:ident:$input:literal => $rule:expr, $note:literal),*) => {
+    mod $group_name {
+        use crate::{lexer, parser::Parser, types::rules::Rule};
+
+        $(
+            #[test]
+            fn $ident() {
+                let input = $input.as_bytes().to_vec();
+                let mut l = lexer::Lexer::new(&input, "parser_test_fail");
+                let toks = l.run();
+                assert_eq!(l.errors.len(), 0);
+
+                let mut parser = Parser::new(toks, "parser_test_fail");
+                let _ = parser.parse();
+                assert_ne!(parser.errors.len(), 0);
+
+                let error = &parser.errors[0];
+                assert_eq!(error.rule, $rule);
+                assert!(
+                    error.note.contains($note),
+                    "expected note to contain {:?}, got {:?}",
+                    $note,
+                    error.note
+                );
+            }
+        )*
+        }
+    };
+}
+
 #[cfg(test)]
 mod should_fail {
     test_group_fail! {
@@ -582,5 +748,13 @@ mod should_fail {
         reindex_invalid_literal: "REINDEX 25;",
         vacuum_no_semicolon: "VACUUM",
         vacuum_invalid_combined: "VACUUM 5 INTO 5;"
+    }
+
+    test_group_fail_assert! {
+        diagnostic_tests,
+        analyze_invalid_target: "ANALYZE 12;" => Rule::Syntax, "expected either schema_name.table or table",
+        invalid_foreign_key_match: "ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table MATCH wat;" => Rule::Syntax, "Wanted FULL, PARTIAL or SIMPLE after MATCH",
+        create_table_empty_column_list: "CREATE TABLE users ();" => Rule::Syntax, "requires at least one column definition",
+        create_index_unimplemented: "CREATE INDEX idx ON users (id);" => Rule::Unimplemented, "sqleibniz does not yet support CREATE"
     }
 }

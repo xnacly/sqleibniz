@@ -4,7 +4,7 @@ use nodes::{BindParameter, SchemaTableContainer};
 use sqleibniz_proc::trace;
 
 use crate::{
-    error::{Error, ImprovedLine},
+    error::{Error, ImprovedLine, Location},
     parser::nodes::{
         ColumnConstraint, ForeignKeyAction, ForeignKeyClause, ForeignKeyMatch, Pragma,
     },
@@ -78,22 +78,24 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn err(&self, msg: impl Into<String>, note: &str, start: &Token, rule: Rule) -> Error {
-        Error {
-            improved_line: None,
-            file: self.name.to_string(),
-            line: start.line,
-            rule,
-            note: note.into(),
-            msg: msg.into(),
-            start: start.start,
-            end: start.end,
-            doc_url: None,
-        }
+    fn err(
+        &self,
+        msg: impl Into<String>,
+        note: &str,
+        src: impl Into<Location>,
+        rule: Rule,
+    ) -> Error {
+        Error::new(self.name, src, rule, msg, note)
     }
 
-    fn push_err(&mut self, msg: impl Into<String>, note: &str, start: &Token, rule: Rule) {
-        let err = self.err(msg, note, start, rule);
+    fn push_err(
+        &mut self,
+        msg: impl Into<String>,
+        note: &str,
+        src: impl Into<Location>,
+        rule: Rule,
+    ) {
+        let err = self.err(msg, note, src, rule);
         self.errors.push(err);
     }
 
@@ -101,14 +103,13 @@ impl<'a> Parser<'a> {
         &mut self,
         msg: impl Into<String>,
         note: impl Into<String>,
-        start: &Token,
+        src: impl Into<Location>,
         rule: Rule,
         doc: &'static str,
     ) {
         let note = note.into();
-        let mut err = self.err(msg, &note, start, rule);
-        err.doc_url = Some(doc);
-        self.errors.push(err);
+        self.errors
+            .push(self.err(msg, &note, src, rule).with_doc_url(doc));
     }
 
     fn is_eof(&self) -> bool {
@@ -303,7 +304,7 @@ impl<'a> Parser<'a> {
     fn sql_stmt_prefix(&mut self) -> Option<Box<dyn nodes::Node>> {
         let r: Option<Box<dyn nodes::Node>> = match self.cur().ttype {
             Type::Keyword(Keyword::EXPLAIN) => {
-                let t = self.cur().clone();
+                let location = Location::from(self.cur());
                 // skip EXPLAIN
                 self.advance();
 
@@ -315,7 +316,7 @@ impl<'a> Parser<'a> {
 
                 // else path is EXPLAIN->*_stmt
                 some_box!(nodes::Explain {
-                    t,
+                    location,
                     child: self.sql_stmt()?,
                 })
             }
@@ -338,6 +339,7 @@ impl<'a> Parser<'a> {
             Type::Keyword(Keyword::PRAGMA) => self.pragma_stmt(),
             Type::Keyword(Keyword::ALTER) => self.alter_stmt(),
             Type::Keyword(Keyword::ATTACH) => self.attach_stmt(),
+            Type::Keyword(Keyword::CREATE) => self.create_stmt(),
             Type::Keyword(Keyword::REINDEX) => self.reindex_stmt(),
             Type::Keyword(Keyword::RELEASE) => self.release_stmt(),
             Type::Keyword(Keyword::SAVEPOINT) => self.savepoint_stmt(),
@@ -436,10 +438,118 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// https://www.sqlite.org/lang_createtable.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn create_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let location = Location::from(self.cur());
+        self.advance();
+
+        let temporary =
+            self.consume_if_keyword(Keyword::TEMP) || self.consume_if_keyword(Keyword::TEMPORARY);
+
+        match self.cur().ttype {
+            Type::Keyword(Keyword::TABLE) => self.create_table_stmt(location, temporary),
+            Type::Keyword(Keyword::INDEX)
+            | Type::Keyword(Keyword::TRIGGER)
+            | Type::Keyword(Keyword::VIEW) => {
+                let src = Location::from(self.cur());
+                let note = format!(
+                    "sqleibniz does not yet support CREATE {:?}",
+                    self.cur().ttype
+                );
+                self.push_err("Unimplemented", &note, src, Rule::Unimplemented);
+                self.skip_until_semicolon_or_eof();
+                None
+            }
+            _ => {
+                let src = Location::from(self.cur());
+                let note = format!(
+                    "CREATE requires TABLE,INDEX,TRIGGER or VIEW at this point, got {:?}.",
+                    self.cur().ttype
+                );
+                self.push_doc_err(
+                    "Unexpected Token",
+                    note,
+                    src,
+                    Rule::Syntax,
+                    "https://www.sqlite.org/lang_create.html",
+                );
+                self.advance();
+                None
+            }
+        }
+    }
+
+    fn create_table_stmt(
+        &mut self,
+        location: Location,
+        temporary: bool,
+    ) -> Option<Box<dyn nodes::Node>> {
+        self.consume_keyword(Keyword::TABLE);
+
+        let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
+            self.consume_keyword(Keyword::NOT);
+            self.consume_keyword(Keyword::EXISTS);
+            true
+        } else {
+            false
+        };
+
+        let name = self.schema_table_container(None)?;
+
+        if self.is(Type::Keyword(Keyword::AS)) {
+            let src = Location::from(self.cur());
+            self.push_err(
+                "Unimplemented",
+                "CREATE TABLE ... AS <select_stmt> is not yet supported",
+                src,
+                Rule::Unimplemented,
+            );
+        }
+
+        self.consume(Type::BraceLeft);
+
+        let mut columns = vec![];
+        loop {
+            if self.is(Type::BraceRight) {
+                if columns.is_empty() {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed column list",
+                        "CREATE TABLE requires at least one column definition",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createtable.html",
+                    );
+                }
+                break;
+            }
+
+            columns.push(self.column_def()?);
+
+            if self.is(Type::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.consume(Type::BraceRight);
+        self.expect_end("https://www.sqlite.org/lang_createtable.html");
+
+        some_box!(nodes::CreateTable {
+            location,
+            temporary,
+            if_not_exists,
+            name,
+            columns,
+        })
+    }
+
     /// https://www.sqlite.org/pragma.html
     #[cfg_attr(feature = "trace", trace)]
     fn pragma_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur().clone();
+        let location = Location::from(self.cur());
 
         // skip PRAGMA
         self.advance();
@@ -451,14 +561,14 @@ impl<'a> Parser<'a> {
 
         let pragma = if self.is(Type::Semicolon) {
             Pragma {
-                t,
+                location,
                 name: schema_and_pragma,
                 invocation: nodes::PragmaInvocation::Query,
             }
         } else if self.is(Type::Equal) {
             self.advance();
             Pragma {
-                t,
+                location,
                 name: schema_and_pragma,
                 invocation: nodes::PragmaInvocation::Assign {
                     value: self.consume_pragma_value("assignment"),
@@ -469,7 +579,7 @@ impl<'a> Parser<'a> {
             let value = self.consume_pragma_value("call");
             self.consume(Type::BraceRight);
             Pragma {
-                t,
+                location,
                 name: schema_and_pragma,
                 invocation: nodes::PragmaInvocation::Call { value },
             }
@@ -497,7 +607,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn alter_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Alter {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             target: SchemaTableContainer::Table(String::new()),
             rename_to: None,
             rename_column_target: None,
@@ -580,7 +690,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn reindex_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Reindex {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             target: None,
         };
         self.advance();
@@ -600,7 +710,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/attach-stmt.html
     #[cfg_attr(feature = "trace", trace)]
     fn attach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur().clone();
+        let location = Location::from(self.cur());
         // skipping ATTACH
         self.advance();
         // skipping optional DATABASE
@@ -609,7 +719,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut a = nodes::Attach {
-            t,
+            location,
             schema_name: String::new(),
             expr: self.expr()?,
         };
@@ -628,7 +738,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn release_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Release {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             savepoint_name: String::new(),
         };
         self.advance();
@@ -651,7 +761,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn savepoint_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut s = nodes::Savepoint {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             savepoint_name: String::new(),
         };
         self.advance();
@@ -670,7 +780,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_dropview.html
     #[cfg_attr(feature = "trace", trace)]
     fn drop_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur().clone();
+        let location = Location::from(self.cur());
         self.advance();
 
         match self.cur().ttype {
@@ -716,7 +826,7 @@ impl<'a> Parser<'a> {
         let argument = self.schema_table_container(None)?;
 
         some_box!(nodes::Drop {
-            t,
+            location,
             ttype,
             if_exists,
             argument,
@@ -727,7 +837,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn analyze_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Analyze {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             target: None,
         };
 
@@ -745,7 +855,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/detach-stmt.html
     #[cfg_attr(feature = "trace", trace)]
     fn detach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        let t = self.cur().clone();
+        let location = Location::from(self.cur());
         self.advance();
 
         // skip optional DATABASE path
@@ -756,7 +866,10 @@ impl<'a> Parser<'a> {
         let schema_name =
             self.consume_ident("https://www.sqlite.org/lang_detach.html", "schema_name")?;
 
-        let d = nodes::Detach { t, schema_name };
+        let d = nodes::Detach {
+            location,
+            schema_name,
+        };
 
         self.expect_end("https://www.sqlite.org/lang_detach.html");
 
@@ -767,7 +880,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn rollback_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut rollback = nodes::Rollback {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             save_point: None,
         };
         self.advance();
@@ -840,7 +953,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn commit_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let commit: Option<Box<dyn nodes::Node>> = some_box!(nodes::Commit {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
         });
 
         // skip either COMMIT or END
@@ -876,7 +989,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn begin_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut begin: nodes::Begin = nodes::Begin {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             transaction_kind: None,
         };
 
@@ -942,7 +1055,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn vacuum_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut v = nodes::Vacuum {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             schema_name: None,
             filename: None,
         };
@@ -1010,7 +1123,7 @@ impl<'a> Parser<'a> {
 
     /// see: https://www.sqlite.org/syntax/literal-value.html
     #[cfg_attr(feature = "trace", trace)]
-    fn literal_value(&mut self) -> Option<Box<dyn nodes::Node>> {
+    fn literal_value(&mut self) -> Option<nodes::Literal> {
         let cur = self.cur();
         match cur.ttype {
             Type::String(_)
@@ -1021,10 +1134,13 @@ impl<'a> Parser<'a> {
             | Type::Keyword(Keyword::CURRENT_TIME)
             | Type::Keyword(Keyword::CURRENT_DATE)
             | Type::Keyword(Keyword::CURRENT_TIMESTAMP) => {
-                let s: Option<Box<dyn nodes::Node>> = some_box!(nodes::Literal { t: cur.clone() });
+                let literal = nodes::Literal {
+                    location: Location::from(cur),
+                    value: cur.clone(),
+                };
                 // skipping over the current character
                 self.advance();
-                s
+                Some(literal)
             }
             _ => {
                 let mut err = self.err("Unexpected Token", &format!("Wanted a literal (any of number,string,blob,null,true,false,CURRENT_TIME,CURRENT_DATE,CURRENT_DATE), got {:?}", cur.ttype),cur, Rule::Syntax);
@@ -1039,7 +1155,7 @@ impl<'a> Parser<'a> {
     /// parses an sql expression: https://www.sqlite.org/syntax/expr.html
     fn expr(&mut self) -> Option<nodes::Expr> {
         let mut e = nodes::Expr {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             literal: None,
             bind: None,
             schema: None,
@@ -1056,7 +1172,7 @@ impl<'a> Parser<'a> {
             | Type::Keyword(Keyword::CURRENT_TIME)
             | Type::Keyword(Keyword::CURRENT_DATE)
             | Type::Keyword(Keyword::CURRENT_TIMESTAMP) => {
-                e.literal = self.literal_value().map(|e| e.token().clone())
+                e.literal = self.literal_value().map(|literal| literal.value)
             }
             // bind parameter with optional ident: ?[ident]
             Type::Question => {
@@ -1064,7 +1180,7 @@ impl<'a> Parser<'a> {
                 // use of this parameter format is discouraged. Programmers are encouraged to use
                 // one of the symbolic formats [...] or the ?NNN format [...] instead.
                 let mut param = BindParameter {
-                    t: self.cur().clone(),
+                    location: Location::from(self.cur()),
 
                     counter: None,
                     name: None,
@@ -1077,14 +1193,18 @@ impl<'a> Parser<'a> {
                     ..
                 } = self.cur()
                 {
-                    param.counter = self.literal_value();
+                    param.counter = self
+                        .literal_value()
+                        .map(|literal| Box::new(literal) as Box<dyn nodes::Node>);
                 }
                 e.bind = Some(param)
             }
             // bind parameter with required ident: [:@$]<ident>
             Type::Colon | Type::At | Type::Dollar => {
+                let bind_location = Location::from(self.cur());
+                let bind_type = self.cur().ttype.clone();
                 let mut bind = BindParameter {
-                    t: self.cur().clone(),
+                    location: bind_location,
                     counter: None,
                     name: None,
                 };
@@ -1103,9 +1223,9 @@ impl<'a> Parser<'a> {
                         "Invalid bind parameter",
                         &format!(
                             "Bind parameter with {:?} requires an identifier as a postfix",
-                            bind.t.ttype
+                            bind_type
                         ),
-                        &bind.t,
+                        bind_location,
                         Rule::Syntax,
                     );
                     // skip invalid token
@@ -1495,17 +1615,14 @@ impl<'a> Parser<'a> {
             .get(self.pos.saturating_sub(1))
             .unwrap_or_else(|| self.cur());
 
-        let err = Error {
-            improved_line: None,
-            file: self.name.to_string(),
-            line: tok.line,
-            rule: Rule::Quirk,
-            note: "SQLite allows columns without a declared type. Such columns use dynamic typing and type affinity is not enforced. Consider adding TEXT, BLOB, REAL, or INTEGER if this is unintended.".into(),
-            msg: "Possibly unintended flexible typed column".into(),
-            start: tok.start,
-            end: tok.end,
-            doc_url: Some("https://www.sqlite.org/quirks.html#the_datatype_is_optional"),
-        };
+        let err = Error::new(
+            self.name,
+            tok,
+            Rule::Quirk,
+            "Possibly unintended flexible typed column",
+            "SQLite allows columns without a declared type. Such columns use dynamic typing and type affinity is not enforced. Consider adding TEXT, BLOB, REAL, or INTEGER if this is unintended.",
+        )
+        .with_doc_url("https://www.sqlite.org/quirks.html#the_datatype_is_optional");
         self.errors.push(err);
     }
 
@@ -1629,9 +1746,7 @@ impl<'a> Parser<'a> {
         } else {
             let lit = self.literal_value();
             Some(ColumnConstraint::Default {
-                literal: lit.map(|n| nodes::Literal {
-                    t: n.token().clone(),
-                }),
+                literal: lit,
                 expr: None,
             })
         }
@@ -1682,7 +1797,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn column_def(&mut self) -> Option<nodes::ColumnDef> {
         let mut def = nodes::ColumnDef {
-            t: self.cur().clone(),
+            location: Location::from(self.cur()),
             name: String::new(),
             type_name: None,
             constraints: vec![],

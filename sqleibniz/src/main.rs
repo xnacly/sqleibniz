@@ -197,7 +197,9 @@ fn main() {
             errors.append(&mut parser.errors);
 
             if let Some(hooks) = config.hooks.as_deref() {
-                errors.append(&mut sqleibniz::hooks::run(&file.name, hooks, &ast, &toks));
+                errors.append(&mut sqleibniz::hooks::run(
+                    &lua, &file.name, hooks, &ast, &toks,
+                ));
             }
         }
 

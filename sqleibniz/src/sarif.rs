@@ -103,7 +103,7 @@ mod tests {
 
         assert_eq!(log["version"], "2.1.0");
         assert_eq!(log["runs"][0]["tool"]["driver"]["name"], "sqleibniz");
-        assert_eq!(log["runs"][0]["results"][0]["ruleId"], "Syntax");
+        assert_eq!(log["runs"][0]["results"][0]["ruleId"], "sql/syntax");
         assert_eq!(
             log["runs"][0]["results"][0]["message"]["text"],
             "Unexpected Literal: expected semicolon"

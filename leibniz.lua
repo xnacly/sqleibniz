@@ -1,73 +1,46 @@
--- this is an example configuration, consult: https://www.lua.org/manual/5.4/
--- or https://learnxinyminutes.com/docs/lua/ for syntax help and
--- src/rules.rs::Config for all available options
+-- Example sqleibniz configuration.
 leibniz = {
     disabled_rules = {
-        -- ignore sqleibniz specific diagnostics:
-        "NoContent",               -- source file is empty
-        "NoStatements",            -- source file contains no statements
-        "Unimplemented",           -- construct is not implemented yet
-        "BadSqleibnizInstruction", -- source file contains a bad sqleibniz instruction
-        "Hook",                    -- a user-defined Lua hook reported a diagnostic
+        -- Ignore project-level diagnostics by default.
+        "file/no-content",            -- source file is empty
+        "file/no-statements",         -- source file contains no statements
+        "sqleibniz/unimplemented",    -- construct is not implemented yet
+        "sqleibniz/bad-instruction",  -- source file contains a bad sqleibniz instruction
+        "sqleibniz/hook",             -- a user-defined Lua hook reported a diagnostic
 
-        -- ignore sqlite specific diagnostics:
-
-        -- "SqliteUnsupported", -- Source file uses sql features sqlite does not support
-        -- "Quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
-        -- "UnknownKeyword", -- an unknown keyword was encountered
-        -- "UnterminatedString", -- a not closed string was found
-        -- "UnknownCharacter", -- an unknown character was found
-        -- "InvalidNumericLiteral", -- an invalid numeric literal was found
-        -- "InvalidBlob", -- an invalid blob literal was found (either bad hex data or incorrect syntax)
-        -- "Syntax", -- a structure with incorrect syntax was found
-        -- "Semicolon", -- a semicolon is missing
+        -- Uncomment sqlite diagnostics to ignore them.
+        -- "sqlite/unsupported", -- Source file uses sql features sqlite does not support
+        -- "sqlite/quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
+        -- "sql/unknown-keyword", -- an unknown keyword was encountered
+        -- "sql/unterminated-string", -- a not closed string was found
+        -- "sql/unknown-character", -- an unknown character was found
+        -- "sql/invalid-numeric-literal", -- an invalid numeric literal was found
+        -- "sql/invalid-blob", -- an invalid blob literal was found (either bad hex data or incorrect syntax)
+        -- "sql/syntax", -- a structure with incorrect syntax was found
+        -- "sql/missing-semicolon", -- a semicolon is missing
     },
-    -- sqleibniz allows for writing custom rules with lua
+
+    -- Custom diagnostics written in Lua.
     hooks = {
         {
-            -- summarises the hooks content
             name = "idents should be lowercase",
-            -- instructs sqleibniz which node to execute the `hook` for
-            node = "Token",
-            -- sqleibniz calls the hook function once it encounters a node name
-            -- matching the hook.node content
-            --
-            -- The `node` argument holds the following fields:
-            --
-            --```
-            --    node: {
-            --     node: string,
-            --     kind: string,
-            --     content: string,
-            --     text: string,
-            --     line: number,
-            --     start: number,
-            --     finish: number,
-            --     children: node[],
-            --    }
-            --```
-            --
+            match = { node = "Token", kind = "Ident" },
             hook = function(node)
-                if node.kind == "Ident" then
-                    if string.match(node.content, "%u") then
-                        -- returing an error passes the diagnostic to sqleibniz,
-                        -- thus a pretty message with the name of the hook, the
-                        -- node it occurs and the message passed to error() is
-                        -- generated
-                        error("All idents should be lowercase")
-                    end
+                if string.match(node.content, "%u") then
+                    sqleibniz.diagnostic(node, "All idents should be lowercase")
                 end
             end
         },
         {
             name = "idents shouldn't be longer than 12 characters",
-            node = "Token",
+            match = { node = "Token", kind = "Ident" },
             hook = function(node)
                 local max_size = 12
-                if node.kind == "Ident" then
-                    if string.len(node.content) >= max_size then
-                        error("idents shouldn't be longer than " .. max_size .. " characters")
-                    end
+                if string.len(node.content) >= max_size then
+                    sqleibniz.diagnostic(
+                        node,
+                        "idents shouldn't be longer than " .. max_size .. " characters"
+                    )
                 end
             end
         }

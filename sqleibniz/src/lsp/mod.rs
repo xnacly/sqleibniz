@@ -88,7 +88,12 @@ struct DocumentState {
     errors: Vec<super::error::Error>,
 }
 
-fn analyze_document(text: &[u8], name: &str, hooks: Option<&[Hook]>) -> DocumentState {
+fn analyze_document(
+    text: &[u8],
+    name: &str,
+    hooks: Option<&[Hook]>,
+    lua: Option<&mlua::Lua>,
+) -> DocumentState {
     let text = text.to_vec();
     let mut l = Lexer::new(&text, name);
     let tokens = l.run();
@@ -96,8 +101,8 @@ fn analyze_document(text: &[u8], name: &str, hooks: Option<&[Hook]>) -> Document
     let mut p = Parser::new(tokens.clone(), name);
     let ast = p.parse();
     errors.append(&mut p.errors);
-    if let Some(hooks) = hooks {
-        errors.append(&mut hooks::run(name, hooks, &ast, &tokens));
+    if let (Some(hooks), Some(lua)) = (hooks, lua) {
+        errors.append(&mut hooks::run(lua, name, hooks, &ast, &tokens));
     }
 
     DocumentState { ast, errors }
@@ -193,6 +198,7 @@ fn event_loop(
                                         change.text.as_bytes(),
                                         &formatted_path,
                                         config.config.hooks.as_deref(),
+                                        config._lua.as_ref(),
                                     ),
                                 );
                             }
@@ -211,6 +217,7 @@ fn event_loop(
                                     params.text_document.text.as_bytes(),
                                     &formatted_path,
                                     config.config.hooks.as_deref(),
+                                    config._lua.as_ref(),
                                 ),
                             );
                         }
@@ -333,7 +340,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{error::Error, lsp::filter_errors, types::rules::Rule};
-    use crate::{lsp::analyze_document, types::config::Hook};
+    use crate::{
+        lsp::analyze_document,
+        types::config::{Hook, HookMatch},
+    };
 
     fn error(rule: Rule) -> Error {
         Error {
@@ -365,8 +375,8 @@ mod tests {
             .load(
                 r#"
                 return function(node)
-                    if node.kind == "Ident" and string.match(node.content, "%u") then
-                        error("ident should be lowercase")
+                    if string.match(node.content, "%u") then
+                        sqleibniz.diagnostic(node, "ident should be lowercase")
                     end
                 end
             "#,
@@ -375,12 +385,17 @@ mod tests {
             .unwrap();
         let hooks = vec![Hook {
             name: "idents should be lowercase".into(),
-            node: Some("Token".into()),
+            matcher: Some(HookMatch {
+                node: Some("Token".into()),
+                kind: Some("Ident".into()),
+                content: None,
+            }),
             hook: Some(hook_fn),
         }];
 
-        let without_hooks = analyze_document(b"VACUUM UpperName;", "test.sql", None);
-        let with_hooks = analyze_document(b"VACUUM UpperName;", "test.sql", Some(&hooks));
+        let without_hooks = analyze_document(b"VACUUM UpperName;", "test.sql", None, None);
+        let with_hooks =
+            analyze_document(b"VACUUM UpperName;", "test.sql", Some(&hooks), Some(&lua));
 
         assert!(
             !without_hooks

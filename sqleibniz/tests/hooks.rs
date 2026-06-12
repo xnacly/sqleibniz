@@ -63,10 +63,10 @@ leibniz = {
     hooks = {
         {
             name = "idents should be lowercase",
-            node = "Token",
+            match = { node = "Token", kind = "Ident" },
             hook = function(node)
-                if node.kind == "Ident" and string.match(node.content, "%u") then
-                    error("ident should be lowercase")
+                if string.match(node.content, "%u") then
+                    sqleibniz.diagnostic(node, "ident should be lowercase")
                 end
             end
         }
@@ -90,7 +90,7 @@ fn hook_error_reports_diagnostic() {
 
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Hook: idents should be lowercase"));
+    assert!(stdout.contains("sqleibniz/hook: idents should be lowercase"));
     assert!(stdout.contains("ident should be lowercase"));
 }
 
@@ -104,7 +104,7 @@ fn hook_diagnostics_can_be_disabled() {
         arg("--config"),
         file_arg(&config),
         arg("-D"),
-        arg("hook"),
+        arg("sqleibniz/hook"),
         file_arg(&sql),
     ]);
 

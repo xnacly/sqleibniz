@@ -110,7 +110,7 @@ fn sarif_omits_disabled_rules() {
         arg("--sarif"),
         arg("--ignore-config"),
         arg("-D"),
-        arg("no-content"),
+        arg("file/no-content"),
         file_arg(&file),
     ]);
 

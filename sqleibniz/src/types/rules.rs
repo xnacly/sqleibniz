@@ -1,36 +1,50 @@
 #[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize)]
-/// Rule is attached to each error and can be supplied to sqleibniz via the Config structure serialized in ./leibniz.toml
+/// Rule is attached to each diagnostic and can be disabled from the CLI or leibniz.lua.
 #[derive(clap::ValueEnum)]
 pub enum Rule {
     /// Source file is empty
+    #[value(name = "file/no-content")]
     NoContent,
     /// Source file is not empty but holds no statements
+    #[value(name = "file/no-statements")]
     NoStatements,
     /// Source file contains constructs sqleibniz does not yet understand
+    #[value(name = "sqleibniz/unimplemented")]
     Unimplemented,
     /// Source file contains an unknown keyword
+    #[value(name = "sql/unknown-keyword")]
     UnknownKeyword,
     /// Source file contains invalid sqleibniz instruction
+    #[value(name = "sqleibniz/bad-instruction")]
     BadSqleibnizInstruction,
     /// User-defined Lua hook reported a diagnostic
+    #[value(name = "sqleibniz/hook")]
     Hook,
     /// Source file uses sql features sqlite does not support
+    #[value(name = "sqlite/unsupported")]
     SqliteUnsupported,
     /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
     /// from a stricter, conventional SQL model
+    #[value(name = "sqlite/quirk")]
     Quirk,
     /// Source file contains an unterminated string
+    #[value(name = "sql/unterminated-string")]
     UnterminatedString,
     /// The source file contains an unknown character
+    #[value(name = "sql/unknown-character")]
     UnknownCharacter,
     /// The source file contains an invalid numeric literal, either overflow or incorrect syntax
+    #[value(name = "sql/invalid-numeric-literal")]
     InvalidNumericLiteral,
     /// The source file contains an invalid blob literal, either bad hex data (a-f,A-F,0-9) or
     /// incorrect syntax
+    #[value(name = "sql/invalid-blob")]
     InvalidBlob,
     /// The source file contains a structure with incorrect syntax
+    #[value(name = "sql/syntax")]
     Syntax,
     /// The source file is missing a semicolon
+    #[value(name = "sql/missing-semicolon")]
     Semicolon,
 }
 
@@ -39,25 +53,25 @@ impl mlua::FromLua for Rule {
         let value: String = lua.unpack(value)?;
 
         Ok(match value.as_str() {
-            "NoContent" => Self::NoContent,
-            "NoStatements" => Self::NoStatements,
-            "Unimplemented" => Self::Unimplemented,
-            "UnterminatedString" => Self::UnterminatedString,
-            "UnknownCharacter" => Self::UnknownCharacter,
-            "InvalidNumericLiteral" => Self::InvalidNumericLiteral,
-            "InvalidBlob" => Self::InvalidBlob,
-            "Syntax" => Self::Syntax,
-            "Semicolon" => Self::Semicolon,
-            "BadSqleibnizInstruction" => Self::BadSqleibnizInstruction,
-            "Hook" => Self::Hook,
-            "UnknownKeyword" => Self::UnknownKeyword,
-            "SqliteUnsupported" => Self::SqliteUnsupported,
-            "Quirk" => Self::Quirk,
+            "file/no-content" => Self::NoContent,
+            "file/no-statements" => Self::NoStatements,
+            "sqleibniz/unimplemented" => Self::Unimplemented,
+            "sql/unterminated-string" => Self::UnterminatedString,
+            "sql/unknown-character" => Self::UnknownCharacter,
+            "sql/invalid-numeric-literal" => Self::InvalidNumericLiteral,
+            "sql/invalid-blob" => Self::InvalidBlob,
+            "sql/syntax" => Self::Syntax,
+            "sql/missing-semicolon" => Self::Semicolon,
+            "sqleibniz/bad-instruction" => Self::BadSqleibnizInstruction,
+            "sqleibniz/hook" => Self::Hook,
+            "sql/unknown-keyword" => Self::UnknownKeyword,
+            "sqlite/unsupported" => Self::SqliteUnsupported,
+            "sqlite/quirk" => Self::Quirk,
             _ => {
                 return Err(mlua::Error::FromLuaConversionError {
                     from: "string",
                     to: "sqleibniz::rules::Rule".into(),
-                    message: Some("Unknown rule name".into()),
+                    message: Some(format!("Unknown rule name '{value}'")),
                 });
             }
         })
@@ -67,20 +81,20 @@ impl mlua::FromLua for Rule {
 impl Rule {
     pub fn name(&self) -> &str {
         match self {
-            Self::NoContent => "NoContent",
-            Self::NoStatements => "NoStatements",
-            Self::Unimplemented => "Unimplemented",
-            Self::UnterminatedString => "UnterminatedString",
-            Self::UnknownCharacter => "UnknownCharacter",
-            Self::InvalidNumericLiteral => "InvalidNumericLiteral",
-            Self::InvalidBlob => "InvalidBlob",
-            Self::Syntax => "Syntax",
-            Self::Quirk => "Quirk",
-            Self::Semicolon => "Semicolon",
-            Self::BadSqleibnizInstruction => "BadSqleibnizInstruction",
-            Self::Hook => "Hook",
-            Self::UnknownKeyword => "UnknownKeyword",
-            Self::SqliteUnsupported => "SqliteUnsupported",
+            Self::NoContent => "file/no-content",
+            Self::NoStatements => "file/no-statements",
+            Self::Unimplemented => "sqleibniz/unimplemented",
+            Self::UnterminatedString => "sql/unterminated-string",
+            Self::UnknownCharacter => "sql/unknown-character",
+            Self::InvalidNumericLiteral => "sql/invalid-numeric-literal",
+            Self::InvalidBlob => "sql/invalid-blob",
+            Self::Syntax => "sql/syntax",
+            Self::Quirk => "sqlite/quirk",
+            Self::Semicolon => "sql/missing-semicolon",
+            Self::BadSqleibnizInstruction => "sqleibniz/bad-instruction",
+            Self::Hook => "sqleibniz/hook",
+            Self::UnknownKeyword => "sql/unknown-keyword",
+            Self::SqliteUnsupported => "sqlite/unsupported",
         }
     }
 

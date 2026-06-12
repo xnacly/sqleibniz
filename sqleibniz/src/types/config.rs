@@ -81,10 +81,18 @@ impl FromLua for Config {
 /// sqleibniz allows for writing custom rules with lua
 pub struct Hook {
     pub name: String,
-    /// node is optional, because omitting it executes the hook for every encountered node
-    pub node: Option<String>,
+    /// matcher limits which hook contexts execute the hook.
+    /// Omitting it executes the hook for every encountered context.
+    pub matcher: Option<HookMatch>,
     /// hook can be executed via [Function::exec]`(arg)`, where args is [HookContext]
     pub hook: Option<Function>,
+}
+
+#[derive(Debug, Default)]
+pub struct HookMatch {
+    pub node: Option<String>,
+    pub kind: Option<String>,
+    pub content: Option<String>,
 }
 
 impl Hook {
@@ -100,18 +108,24 @@ impl FromLua for Hook {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         let table: Table = lua.unpack(value)?;
         let name = table.get("name")?;
-        let node = table.get("node").ok();
+        let matcher = table.get("match").ok();
         let hook: Option<Function> = table.get("hook").ok();
-        // INFO: lua function call example
-        //
-        // if let Some(h) = &hook {
-        //     let () = dbg!(h.call(HookContext {
-        //         kind: "ident".into(),
-        //         text: Some("UPPERCASE".into()),
-        //         children: vec![],
-        //     }))?;
-        // }
-        Ok(Self { name, node, hook })
+        Ok(Self {
+            name,
+            matcher,
+            hook,
+        })
+    }
+}
+
+impl FromLua for HookMatch {
+    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+        let table: Table = lua.unpack(value)?;
+        Ok(Self {
+            node: table.get("node").ok(),
+            kind: table.get("kind").ok(),
+            content: table.get("content").ok(),
+        })
     }
 }
 

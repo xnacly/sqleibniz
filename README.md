@@ -136,21 +136,20 @@ Options:
           disable diagnostics by their rules, all are enabled by default - this may change in the future
 
           Possible values:
-          - file/no-content:            Source file is empty
-          - file/no-statements:         Source file is not empty but holds no statements
-          - sqleibniz/unimplemented:    Source file contains constructs sqleibniz does not yet understand
-          - sql/unknown-keyword:        Source file contains an unknown keyword
-          - sqleibniz/bad-instruction:  Source file contains invalid sqleibniz instruction
-          - sqleibniz/hook:             User-defined Lua hook reported a diagnostic
+          - file/no-content:             Source file is empty
+          - file/no-statements:          Source file is not empty but holds no statements
+          - sqleibniz/unimplemented:     Source file contains constructs sqleibniz does not yet understand
+          - sql/unknown-keyword:         Source file contains an unknown keyword
+          - sqleibniz/bad-instruction:   Source file contains invalid sqleibniz instruction
+          - sqleibniz/hook:              User-defined Lua hook reported a diagnostic
           - sqlite/unsupported:         Source file uses sql features sqlite does not support
-          - sqlite/quirk:               Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates from a stricter, conventional SQL model
-          - sql/unterminated-string:    Source file contains an unterminated string
-          - sql/unknown-character:      The source file contains an unknown character
-          - sql/invalid-numeric-literal:
-            The source file contains an invalid numeric literal, either overflow or incorrect syntax
-          - sql/invalid-blob:           The source file contains an invalid blob literal, either bad hex data (a-f,A-F,0-9) or incorrect syntax
-          - sql/syntax:                 The source file contains a structure with incorrect syntax
-          - sql/missing-semicolon:      The source file is missing a semicolon
+          - sqlite/quirk:                Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates from a stricter, conventional SQL model
+          - sql/unterminated-string:     Source file contains an unterminated string
+          - sql/unknown-character:       The source file contains an unknown character
+          - sql/invalid-numeric-literal: The source file contains an invalid numeric literal, either overflow or incorrect syntax
+          - sql/invalid-blob:            The source file contains an invalid blob literal, either bad hex data (a-f,A-F,0-9) or incorrect syntax
+          - sql/syntax:                  The source file contains a structure with incorrect syntax
+          - sql/missing-semicolon:       The source file is missing a semicolon
 
       --ast-json
           dump the abstract syntax tree as pretty printed json

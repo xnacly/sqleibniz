@@ -43,7 +43,11 @@ impl_field_serializable_with_serde_to_value!(
     SqliteStorageClass,
     SchemaTableContainer,
     Type,
-    PragmaInvocation
+    PragmaInvocation,
+    IndexedColumn,
+    TriggerTiming,
+    TriggerEvent,
+    TriggerBodyStmt
 );
 
 impl FieldSerializable for ColumnConstraint {
@@ -117,6 +121,45 @@ impl FieldSerializable for ColumnConstraint {
     }
 }
 
+impl FieldSerializable for TableConstraint {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        match self {
+            TableConstraint::PrimaryKey {
+                columns,
+                on_conflict,
+            } => serde_json::json!({
+                "primary_key": {
+                    "columns": columns,
+                    "on_conflict": on_conflict,
+                }
+            }),
+            TableConstraint::Unique {
+                columns,
+                on_conflict,
+            } => serde_json::json!({
+                "unique": {
+                    "columns": columns,
+                    "on_conflict": on_conflict,
+                }
+            }),
+            TableConstraint::Check(expr) => serde_json::json!({
+                "check": {
+                    "expr": expr.as_serializable(),
+                }
+            }),
+            TableConstraint::ForeignKey {
+                columns,
+                foreign_key_clause,
+            } => serde_json::json!({
+                "foreign_key": {
+                    "columns": columns,
+                    "foreign_key_clause": foreign_key_clause,
+                }
+            }),
+        }
+    }
+}
+
 impl FieldSerializable for Token {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::to_value(&self.ttype).unwrap()
@@ -176,7 +219,11 @@ impl_empty_field_hook_contexts!(
     bool,
     Keyword,
     SqliteStorageClass,
-    SchemaTableContainer
+    SchemaTableContainer,
+    IndexedColumn,
+    TriggerTiming,
+    TriggerEvent,
+    TriggerBodyStmt
 );
 
 impl FieldHookContexts for PragmaInvocation {
@@ -203,6 +250,15 @@ impl FieldHookContexts for ColumnConstraint {
                 literal: Some(literal),
                 ..
             } => literal.field_hook_contexts(),
+            _ => vec![],
+        }
+    }
+}
+
+impl FieldHookContexts for TableConstraint {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            TableConstraint::Check(expr) => expr.field_hook_contexts(),
             _ => vec![],
         }
     }

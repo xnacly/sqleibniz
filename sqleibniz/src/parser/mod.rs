@@ -136,6 +136,25 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn skip_until_keyword_at_depth_zero(&mut self, keyword: Keyword) {
+        let mut depth = 0;
+        while !self.is_eof() {
+            match self.cur().ttype {
+                Type::BraceLeft => depth += 1,
+                Type::BraceRight if depth > 0 => depth -= 1,
+                Type::Keyword(current) if current == keyword && depth == 0 => break,
+                _ => {}
+            }
+            self.advance();
+        }
+    }
+
+    fn skip_until_trigger_stmt_end(&mut self) {
+        while !self.is_eof() && !self.is(Type::Semicolon) && !self.is_keyword(Keyword::END) {
+            self.advance();
+        }
+    }
+
     /// checks if type of current token is equal to t, otherwise pushs an error, advances either way
     fn consume(&mut self, t: Type) {
         let tt = t.clone();
@@ -446,20 +465,27 @@ impl<'a> Parser<'a> {
 
         let temporary =
             self.consume_if_keyword(Keyword::TEMP) || self.consume_if_keyword(Keyword::TEMPORARY);
+        let unique = self.consume_if_keyword(Keyword::UNIQUE);
+
+        if unique && !self.is_keyword(Keyword::INDEX) {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Unexpected Token",
+                "CREATE UNIQUE is only valid for INDEX",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_createindex.html",
+            );
+            self.skip_until_semicolon_or_eof();
+            return None;
+        }
 
         match self.cur().ttype {
-            Type::Keyword(Keyword::TABLE) => self.create_table_stmt(location, temporary),
-            Type::Keyword(Keyword::INDEX)
-            | Type::Keyword(Keyword::TRIGGER)
-            | Type::Keyword(Keyword::VIEW) => {
-                let src = Location::from(self.cur());
-                let note = format!(
-                    "sqleibniz does not yet support CREATE {:?}",
-                    self.cur().ttype
-                );
-                self.push_err("Unimplemented", &note, src, Rule::Unimplemented);
-                self.skip_until_semicolon_or_eof();
-                None
+            Type::Keyword(Keyword::TABLE) if !unique => self.create_table_stmt(location, temporary),
+            Type::Keyword(Keyword::INDEX) => self.create_index_stmt(location, temporary, unique),
+            Type::Keyword(Keyword::VIEW) if !unique => self.create_view_stmt(),
+            Type::Keyword(Keyword::TRIGGER) if !unique => {
+                self.create_trigger_stmt(location, temporary)
             }
             _ => {
                 let src = Location::from(self.cur());
@@ -480,6 +506,8 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// https://www.sqlite.org/lang_createtable.html
+    #[cfg_attr(feature = "trace", trace)]
     fn create_table_stmt(
         &mut self,
         location: Location,
@@ -505,14 +533,17 @@ impl<'a> Parser<'a> {
                 src,
                 Rule::Unimplemented,
             );
+            self.skip_until_semicolon_or_eof();
+            return None;
         }
 
         self.consume(Type::BraceLeft);
 
         let mut columns = vec![];
+        let mut table_constraints = vec![];
         loop {
             if self.is(Type::BraceRight) {
-                if columns.is_empty() {
+                if columns.is_empty() && table_constraints.is_empty() {
                     let src = Location::from(self.cur());
                     self.push_doc_err(
                         "Malformed column list",
@@ -525,16 +556,28 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            columns.push(self.column_def()?);
+            if self.starts_table_constraint() {
+                table_constraints.push(self.table_constraint()?);
+            } else {
+                columns.push(self.column_def()?);
+            }
 
             if self.is(Type::Comma) {
                 self.advance();
+                if self.is(Type::BraceRight) {
+                    if self.starts_table_constraint() {
+                        self.table_constraint()?;
+                    } else {
+                        self.column_def()?;
+                    }
+                }
             } else {
                 break;
             }
         }
 
         self.consume(Type::BraceRight);
+        let (strict, without_rowid) = self.create_table_options();
         self.expect_end("https://www.sqlite.org/lang_createtable.html");
 
         some_box!(nodes::CreateTable {
@@ -543,7 +586,564 @@ impl<'a> Parser<'a> {
             if_not_exists,
             name,
             columns,
+            table_constraints,
+            strict,
+            without_rowid,
         })
+    }
+
+    /// https://www.sqlite.org/syntax/table-options.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn create_table_options(&mut self) -> (bool, bool) {
+        let mut strict = false;
+        let mut without_rowid = false;
+
+        while !self.is(Type::Semicolon) && !self.is_eof() {
+            match self.cur().ttype {
+                Type::Keyword(Keyword::STRICT) => {
+                    strict = true;
+                    self.advance();
+                }
+                Type::Keyword(Keyword::WITHOUT) => {
+                    without_rowid = true;
+                    self.advance();
+                    self.consume_keyword(Keyword::ROWID);
+                }
+                _ => {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Unexpected Token",
+                        format!(
+                            "CREATE TABLE table options expected STRICT or WITHOUT ROWID, got {:?}",
+                            self.cur().ttype
+                        ),
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createtable.html",
+                    );
+                    self.skip_until_semicolon_or_eof();
+                    break;
+                }
+            }
+
+            if self.is(Type::Comma) {
+                self.advance();
+                if self.is(Type::Semicolon) || self.is_eof() {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed table options",
+                        "CREATE TABLE table options list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createtable.html",
+                    );
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        (strict, without_rowid)
+    }
+
+    /// https://www.sqlite.org/lang_createindex.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn create_index_stmt(
+        &mut self,
+        location: Location,
+        temporary: bool,
+        unique: bool,
+    ) -> Option<Box<dyn nodes::Node>> {
+        if temporary {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Unexpected Token",
+                "CREATE INDEX does not support TEMP or TEMPORARY",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_createindex.html",
+            );
+            self.skip_until_semicolon_or_eof();
+            return None;
+        }
+
+        self.consume_keyword(Keyword::INDEX);
+
+        let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
+            self.consume_keyword(Keyword::NOT);
+            self.consume_keyword(Keyword::EXISTS);
+            true
+        } else {
+            false
+        };
+
+        let name = self.schema_table_container(Some("index"))?;
+        self.consume_keyword(Keyword::ON);
+        let table =
+            self.consume_ident("https://www.sqlite.org/lang_createindex.html", "table_name")?;
+        self.consume(Type::BraceLeft);
+
+        let mut columns = vec![];
+        loop {
+            if self.is(Type::BraceRight) {
+                if columns.is_empty() {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed indexed column list",
+                        "CREATE INDEX requires at least one indexed column",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createindex.html",
+                    );
+                }
+                break;
+            }
+
+            let Some(column) = self.indexed_column() else {
+                break;
+            };
+            columns.push(column);
+
+            if self.is(Type::Comma) {
+                self.advance();
+                if self.is(Type::BraceRight) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed indexed column list",
+                        "CREATE INDEX indexed column list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createindex.html",
+                    );
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        self.consume(Type::BraceRight);
+
+        if self.consume_if_keyword(Keyword::WHERE) {
+            let src = Location::from(self.cur());
+            self.push_err(
+                "Unimplemented",
+                "CREATE INDEX partial indexes are not yet supported",
+                src,
+                Rule::Unimplemented,
+            );
+            self.skip_until_semicolon_or_eof();
+        }
+
+        self.expect_end("https://www.sqlite.org/lang_createindex.html");
+
+        some_box!(nodes::CreateIndex {
+            location,
+            unique,
+            if_not_exists,
+            name,
+            table,
+            columns,
+        })
+    }
+
+    /// https://www.sqlite.org/lang_createview.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn create_view_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        self.consume_keyword(Keyword::VIEW);
+
+        if self.consume_if_keyword(Keyword::IF) {
+            self.consume_keyword(Keyword::NOT);
+            self.consume_keyword(Keyword::EXISTS);
+        }
+
+        self.schema_table_container(Some("view"))?;
+        let mut columns = vec![];
+
+        if self.is(Type::BraceLeft) {
+            self.advance();
+            loop {
+                if self.is(Type::BraceRight) {
+                    if columns.is_empty() {
+                        let src = Location::from(self.cur());
+                        self.push_doc_err(
+                            "Malformed view column list",
+                            "CREATE VIEW column list requires at least one column name",
+                            src,
+                            Rule::Syntax,
+                            "https://www.sqlite.org/lang_createview.html",
+                        );
+                    }
+                    break;
+                }
+
+                columns.push(
+                    self.consume_ident(
+                        "https://www.sqlite.org/lang_createview.html",
+                        "column_name",
+                    )?,
+                );
+
+                if self.is(Type::Comma) {
+                    self.advance();
+                    if self.is(Type::BraceRight) {
+                        let src = Location::from(self.cur());
+                        self.push_doc_err(
+                            "Malformed view column list",
+                            "CREATE VIEW column list has a trailing comma",
+                            src,
+                            Rule::Syntax,
+                            "https://www.sqlite.org/lang_createview.html",
+                        );
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            self.consume(Type::BraceRight);
+        }
+
+        self.consume_keyword(Keyword::AS);
+
+        if self.is_keyword(Keyword::SELECT) {
+            let src = Location::from(self.cur());
+            self.push_err(
+                "Unimplemented",
+                "CREATE VIEW ... AS <select_stmt> is not yet supported",
+                src,
+                Rule::Unimplemented,
+            );
+            self.skip_until_semicolon_or_eof();
+        } else {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Unexpected Token",
+                format!(
+                    "CREATE VIEW requires select-stmt after AS, got {:?}",
+                    self.cur().ttype
+                ),
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_createview.html",
+            );
+            self.advance();
+        }
+
+        self.expect_end("https://www.sqlite.org/lang_createview.html");
+        None
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn create_trigger_stmt(
+        &mut self,
+        location: Location,
+        temporary: bool,
+    ) -> Option<Box<dyn nodes::Node>> {
+        self.consume_keyword(Keyword::TRIGGER);
+
+        let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
+            self.consume_keyword(Keyword::NOT);
+            self.consume_keyword(Keyword::EXISTS);
+            true
+        } else {
+            false
+        };
+
+        let name = self.schema_table_container(Some("trigger"))?;
+        let timing = self.trigger_timing()?;
+        let event = self.trigger_event()?;
+        self.consume_keyword(Keyword::ON);
+        let table = self.consume_ident(
+            "https://www.sqlite.org/lang_createtrigger.html",
+            "table_name",
+        )?;
+        let for_each_row = self.trigger_for_each_row();
+        let when = self.trigger_when_clause();
+        self.consume_keyword(Keyword::BEGIN);
+        let body = self.trigger_body();
+        self.consume_keyword(Keyword::END);
+        self.expect_end("https://www.sqlite.org/lang_createtrigger.html");
+
+        some_box!(nodes::CreateTrigger {
+            location,
+            temporary,
+            if_not_exists,
+            name,
+            timing,
+            event,
+            table,
+            for_each_row,
+            when,
+            body,
+        })
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_timing(&mut self) -> Option<Option<nodes::TriggerTiming>> {
+        match self.cur().ttype {
+            Type::Keyword(Keyword::BEFORE) => {
+                self.advance();
+                Some(Some(nodes::TriggerTiming::Before))
+            }
+            Type::Keyword(Keyword::AFTER) => {
+                self.advance();
+                Some(Some(nodes::TriggerTiming::After))
+            }
+            Type::Keyword(Keyword::INSTEAD) => {
+                self.advance();
+                self.consume_keyword(Keyword::OF);
+                Some(Some(nodes::TriggerTiming::InsteadOf))
+            }
+            Type::Keyword(Keyword::DELETE)
+            | Type::Keyword(Keyword::INSERT)
+            | Type::Keyword(Keyword::UPDATE) => Some(None),
+            _ => {
+                let src = Location::from(self.cur());
+                self.push_doc_err(
+                    "Unexpected Token",
+                    format!(
+                        "CREATE TRIGGER expected BEFORE, AFTER, INSTEAD OF, DELETE, INSERT or UPDATE, got {:?}",
+                        self.cur().ttype
+                    ),
+                    src,
+                    Rule::Syntax,
+                    "https://www.sqlite.org/lang_createtrigger.html",
+                );
+                self.skip_until_semicolon_or_eof();
+                None
+            }
+        }
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_event(&mut self) -> Option<nodes::TriggerEvent> {
+        match self.cur().ttype {
+            Type::Keyword(Keyword::DELETE) => {
+                self.advance();
+                Some(nodes::TriggerEvent::Delete)
+            }
+            Type::Keyword(Keyword::INSERT) => {
+                self.advance();
+                Some(nodes::TriggerEvent::Insert)
+            }
+            Type::Keyword(Keyword::UPDATE) => {
+                self.advance();
+                let columns = if self.consume_if_keyword(Keyword::OF) {
+                    self.trigger_column_list()?
+                } else {
+                    vec![]
+                };
+                Some(nodes::TriggerEvent::Update { columns })
+            }
+            _ => {
+                let src = Location::from(self.cur());
+                self.push_doc_err(
+                    "Unexpected Token",
+                    format!(
+                        "CREATE TRIGGER expected DELETE, INSERT or UPDATE event, got {:?}",
+                        self.cur().ttype
+                    ),
+                    src,
+                    Rule::Syntax,
+                    "https://www.sqlite.org/lang_createtrigger.html",
+                );
+                self.skip_until_semicolon_or_eof();
+                None
+            }
+        }
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_column_list(&mut self) -> Option<Vec<String>> {
+        let mut columns = vec![];
+        loop {
+            columns.push(self.consume_ident(
+                "https://www.sqlite.org/lang_createtrigger.html",
+                "column_name",
+            )?);
+
+            if self.is(Type::Comma) {
+                self.advance();
+                if self.is_keyword(Keyword::ON) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed trigger column list",
+                        "CREATE TRIGGER UPDATE OF column list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createtrigger.html",
+                    );
+                    return None;
+                }
+            } else {
+                break;
+            }
+        }
+        Some(columns)
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_for_each_row(&mut self) -> bool {
+        if !self.consume_if_keyword(Keyword::FOR) {
+            return false;
+        }
+
+        self.consume_keyword(Keyword::EACH);
+        self.consume_keyword(Keyword::ROW);
+        true
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_when_clause(&mut self) -> bool {
+        if !self.consume_if_keyword(Keyword::WHEN) {
+            return false;
+        }
+
+        if self.is_keyword(Keyword::BEGIN) {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Malformed trigger WHEN clause",
+                "CREATE TRIGGER WHEN requires an expression before BEGIN",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_createtrigger.html",
+            );
+            return true;
+        }
+
+        self.skip_until_keyword_at_depth_zero(Keyword::BEGIN);
+        true
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_body(&mut self) -> Vec<nodes::TriggerBodyStmt> {
+        let mut body = vec![];
+
+        while !self.is_eof() && !self.is_keyword(Keyword::END) {
+            let Some(stmt) = self.trigger_body_stmt_kind() else {
+                self.skip_until_trigger_stmt_end();
+                break;
+            };
+            body.push(stmt);
+            self.skip_until_trigger_stmt_end();
+
+            if self.is(Type::Semicolon) {
+                self.advance();
+            } else if self.is_keyword(Keyword::END) {
+                let src = Location::from(self.cur());
+                self.push_err(
+                    "Missing semicolon",
+                    "Wanted Semicolon before END, terminate statements with ';'",
+                    src,
+                    Rule::Semicolon,
+                );
+                break;
+            } else if !self.is_keyword(Keyword::END) {
+                self.consume(Type::Semicolon);
+                break;
+            }
+        }
+
+        if body.is_empty() {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Malformed trigger body",
+                "CREATE TRIGGER body requires at least one trigger statement",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_createtrigger.html",
+            );
+        }
+
+        body
+    }
+
+    /// https://www.sqlite.org/lang_createtrigger.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn trigger_body_stmt_kind(&mut self) -> Option<nodes::TriggerBodyStmt> {
+        match self.cur().ttype {
+            Type::Keyword(Keyword::DELETE) => Some(nodes::TriggerBodyStmt::Delete),
+            Type::Keyword(Keyword::INSERT) => Some(nodes::TriggerBodyStmt::Insert),
+            Type::Keyword(Keyword::SELECT) => Some(nodes::TriggerBodyStmt::Select),
+            Type::Keyword(Keyword::UPDATE) => Some(nodes::TriggerBodyStmt::Update),
+            _ => {
+                let src = Location::from(self.cur());
+                self.push_doc_err(
+                    "Unexpected Token",
+                    format!(
+                        "CREATE TRIGGER body expected DELETE, INSERT, SELECT or UPDATE, got {:?}",
+                        self.cur().ttype
+                    ),
+                    src,
+                    Rule::Syntax,
+                    "https://www.sqlite.org/lang_createtrigger.html",
+                );
+                None
+            }
+        }
+    }
+
+    /// https://www.sqlite.org/syntax/indexed-column.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn indexed_column(&mut self) -> Option<nodes::IndexedColumn> {
+        let name = match self.cur().ttype.clone() {
+            Type::Ident(name) => {
+                self.advance();
+                name
+            }
+            _ => {
+                let src = Location::from(self.cur());
+                self.push_err(
+                    "Unimplemented",
+                    "CREATE INDEX expression indexes are not yet supported",
+                    src,
+                    Rule::Unimplemented,
+                );
+                self.skip_indexed_column();
+                return None;
+            }
+        };
+
+        let collation = if self.consume_if_keyword(Keyword::COLLATE) {
+            Some(self.consume_ident(
+                "https://www.sqlite.org/syntax/indexed-column.html",
+                "collation_name",
+            )?)
+        } else {
+            None
+        };
+
+        let order = self.consume_optional_keyword(&[Keyword::ASC, Keyword::DESC]);
+
+        Some(nodes::IndexedColumn {
+            name,
+            collation,
+            order,
+        })
+    }
+
+    /// Skips an unsupported indexed-column expression until the next top-level comma or `)`.
+    fn skip_indexed_column(&mut self) {
+        let mut depth = 0;
+        while !self.is_eof() {
+            match self.cur().ttype {
+                Type::BraceLeft => depth += 1,
+                Type::BraceRight if depth == 0 => break,
+                Type::BraceRight => depth -= 1,
+                Type::Comma if depth == 0 => break,
+                _ => {}
+            }
+            self.advance();
+        }
     }
 
     /// https://www.sqlite.org/pragma.html
@@ -1268,6 +1868,25 @@ impl<'a> Parser<'a> {
         target_name: Option<&str>,
     ) -> Option<SchemaTableContainer> {
         match self.cur().ttype.clone() {
+            Type::Keyword(Keyword::TEMP) if self.next_is(Type::Dot) => {
+                self.advance();
+                self.advance();
+
+                let table = match &self.cur().ttype {
+                    Type::Ident(table) | Type::String(table) => table.clone(),
+                    _ => {
+                        self.push_malformed_schema_table_error(target_name);
+                        self.advance();
+                        return None;
+                    }
+                };
+
+                self.advance();
+                Some(SchemaTableContainer::SchemaAndTable {
+                    schema: "temp".into(),
+                    table,
+                })
+            }
             Type::Ident(schema) if self.next_is(Type::Dot) => {
                 // skip schema_name
                 self.advance();
@@ -1670,6 +2289,163 @@ impl<'a> Parser<'a> {
                 | Type::Keyword(Keyword::GENERATED)
                 | Type::Keyword(Keyword::AS)
         )
+    }
+
+    fn starts_table_constraint(&mut self) -> bool {
+        matches!(
+            self.cur().ttype,
+            Type::Keyword(Keyword::CONSTRAINT)
+                | Type::Keyword(Keyword::PRIMARY)
+                | Type::Keyword(Keyword::UNIQUE)
+                | Type::Keyword(Keyword::CHECK)
+                | Type::Keyword(Keyword::FOREIGN)
+        )
+    }
+
+    /// https://www.sqlite.org/syntax/table-constraint.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn table_constraint(&mut self) -> Option<nodes::TableConstraint> {
+        if self.consume_if_keyword(Keyword::CONSTRAINT) {
+            self.consume_ident(
+                "https://www.sqlite.org/syntax/table-constraint.html",
+                "constraint_name",
+            )?;
+        }
+
+        if self.is_keyword(Keyword::PRIMARY) {
+            self.advance();
+            self.consume_keyword(Keyword::KEY);
+            self.consume(Type::BraceLeft);
+            let columns = self.indexed_column_list("PRIMARY KEY")?;
+            self.consume(Type::BraceRight);
+            Some(nodes::TableConstraint::PrimaryKey {
+                columns,
+                on_conflict: self.conflict_clause(),
+            })
+        } else if self.is_keyword(Keyword::UNIQUE) {
+            self.advance();
+            self.consume(Type::BraceLeft);
+            let columns = self.indexed_column_list("UNIQUE")?;
+            self.consume(Type::BraceRight);
+            Some(nodes::TableConstraint::Unique {
+                columns,
+                on_conflict: self.conflict_clause(),
+            })
+        } else if self.is_keyword(Keyword::CHECK) {
+            self.advance();
+            self.consume(Type::BraceLeft);
+            let expr = self.expr()?;
+            self.consume(Type::BraceRight);
+            Some(nodes::TableConstraint::Check(expr))
+        } else if self.is_keyword(Keyword::FOREIGN) {
+            self.advance();
+            self.consume_keyword(Keyword::KEY);
+            self.consume(Type::BraceLeft);
+            let columns = self.column_name_list("FOREIGN KEY")?;
+            self.consume(Type::BraceRight);
+            Some(nodes::TableConstraint::ForeignKey {
+                columns,
+                foreign_key_clause: self.foreign_key_clause()?,
+            })
+        } else {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Unexpected Token",
+                format!(
+                    "CREATE TABLE table constraint expected PRIMARY KEY, UNIQUE, CHECK or FOREIGN KEY, got {:?}",
+                    self.cur().ttype
+                ),
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/syntax/table-constraint.html",
+            );
+            None
+        }
+    }
+
+    /// https://www.sqlite.org/syntax/indexed-column.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn indexed_column_list(&mut self, constraint_name: &str) -> Option<Vec<nodes::IndexedColumn>> {
+        let mut columns = vec![];
+        loop {
+            if self.is(Type::BraceRight) {
+                if columns.is_empty() {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed table constraint",
+                        format!("{constraint_name} requires at least one indexed column"),
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/table-constraint.html",
+                    );
+                }
+                break;
+            }
+
+            columns.push(self.indexed_column()?);
+
+            if self.is(Type::Comma) {
+                self.advance();
+                if self.is(Type::BraceRight) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed table constraint",
+                        format!("{constraint_name} indexed column list has a trailing comma"),
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/table-constraint.html",
+                    );
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        Some(columns)
+    }
+
+    /// https://www.sqlite.org/syntax/column-name-list.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn column_name_list(&mut self, constraint_name: &str) -> Option<Vec<String>> {
+        let mut columns = vec![];
+        loop {
+            if self.is(Type::BraceRight) {
+                if columns.is_empty() {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed table constraint",
+                        format!("{constraint_name} requires at least one column name"),
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/table-constraint.html",
+                    );
+                }
+                break;
+            }
+
+            columns.push(self.consume_ident(
+                "https://www.sqlite.org/syntax/column-name-list.html",
+                "column_name",
+            )?);
+
+            if self.is(Type::Comma) {
+                self.advance();
+                if self.is(Type::BraceRight) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed table constraint",
+                        format!("{constraint_name} column list has a trailing comma"),
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/table-constraint.html",
+                    );
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        Some(columns)
     }
 
     fn column_constraint(&mut self) -> Option<ColumnConstraint> {

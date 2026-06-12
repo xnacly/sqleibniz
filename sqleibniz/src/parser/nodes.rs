@@ -515,6 +515,24 @@ pub enum ColumnConstraint {
     ForeignKey(ForeignKeyClause),
 }
 
+#[derive(Debug)]
+/// https://www.sqlite.org/syntax/table-constraint.html
+pub enum TableConstraint {
+    PrimaryKey {
+        columns: Vec<IndexedColumn>,
+        on_conflict: Option<Keyword>,
+    },
+    Unique {
+        columns: Vec<IndexedColumn>,
+        on_conflict: Option<Keyword>,
+    },
+    Check(Expr),
+    ForeignKey {
+        columns: Vec<String>,
+        foreign_key_clause: ForeignKeyClause,
+    },
+}
+
 node!(
     ColumnDef,
     "Column definition, see: https://www.sqlite.org/syntax/column-def.html",
@@ -534,12 +552,86 @@ column-list form:
 ```sql
 CREATE TABLE table_name (column_def, ...);
 CREATE TEMP TABLE IF NOT EXISTS schema.table_name (column_def, ...);
+CREATE TABLE table_name (column_def, ...) STRICT;
 ```
 ",
     temporary: bool,
     if_not_exists: bool,
     name: SchemaTableContainer,
-    columns: Vec<ColumnDef>
+    columns: Vec<ColumnDef>,
+    table_constraints: Vec<TableConstraint>,
+    strict: bool,
+    without_rowid: bool
+);
+
+#[derive(Debug, serde::Serialize)]
+pub struct IndexedColumn {
+    pub name: String,
+    pub collation: Option<String>,
+    pub order: Option<Keyword>,
+}
+
+node!(
+    CreateIndex,
+    r"CREATE INDEX statement, see: https://www.sqlite.org/lang_createindex.html
+
+The CREATE INDEX command creates a new index for a table. This node currently represents column
+indexes:
+
+```sql
+CREATE INDEX index_name ON table_name (column_name);
+CREATE UNIQUE INDEX IF NOT EXISTS schema.index_name ON table_name (column_name COLLATE collation_name DESC);
+```
+",
+    unique: bool,
+    if_not_exists: bool,
+    name: SchemaTableContainer,
+    table: String,
+    columns: Vec<IndexedColumn>
+);
+
+#[derive(Debug, serde::Serialize)]
+pub enum TriggerTiming {
+    Before,
+    After,
+    InsteadOf,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub enum TriggerEvent {
+    Delete,
+    Insert,
+    Update { columns: Vec<String> },
+}
+
+#[derive(Debug, serde::Serialize)]
+pub enum TriggerBodyStmt {
+    Delete,
+    Insert,
+    Select,
+    Update,
+}
+
+node!(
+    CreateTrigger,
+    r"CREATE TRIGGER statement, see: https://www.sqlite.org/lang_createtrigger.html
+
+The CREATE TRIGGER command creates a database trigger.
+
+```sql
+CREATE TRIGGER trigger_name AFTER INSERT ON table_name BEGIN SELECT 1; END;
+CREATE TEMP TRIGGER IF NOT EXISTS schema.trigger_name INSTEAD OF UPDATE OF column_name ON table_name FOR EACH ROW BEGIN UPDATE table_name SET column_name = 1; END;
+```
+",
+    temporary: bool,
+    if_not_exists: bool,
+    name: SchemaTableContainer,
+    timing: Option<TriggerTiming>,
+    event: TriggerEvent,
+    table: String,
+    for_each_row: bool,
+    when: bool,
+    body: Vec<TriggerBodyStmt>
 );
 
 #[derive(Debug, serde::Serialize)]

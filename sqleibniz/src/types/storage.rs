@@ -10,6 +10,7 @@ pub enum SqliteStorageClass {
     Real,
     Text,
     Blob,
+    Any,
 }
 
 trait StrExtension {
@@ -35,6 +36,7 @@ impl Display for SqliteStorageClass {
             Self::Real => write!(f, "REAL"),
             Self::Text => write!(f, "TEXT"),
             Self::Blob => write!(f, "BLOB"),
+            Self::Any => write!(f, "ANY"),
             Self::Integer => write!(f, "INTEGER"),
         }
     }
@@ -45,6 +47,8 @@ impl SqliteStorageClass {
     pub fn from_str(s: &str) -> Self {
         if s.contains_any(vec!["VARCHAR", "CLOB", "TEXT"]) {
             Self::Text
+        } else if s == "ANY" {
+            Self::Any
         } else if s.is_empty() || s.contains("BLOB") {
             Self::Blob
         } else if s.contains_any(vec!["REAL", "FLOA", "DOUB"]) {
@@ -61,6 +65,7 @@ impl SqliteStorageClass {
         Some(match s {
             "TEXT" => Self::Text,
             "BLOB" => Self::Blob,
+            "ANY" => Self::Any,
             "REAL" => Self::Real,
             "INT" | "INTEGER" => Self::Integer,
             _ => {

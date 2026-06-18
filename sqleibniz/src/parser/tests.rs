@@ -1643,7 +1643,9 @@ mod should_analyze {
         pragma_unsupported_documented_form:
             "PRAGMA foreign_keys(true);" => Rule::Syntax, "query or assignment form",
         pragma_unsupported_documented_value:
-            "PRAGMA foreign_keys = maybe;" => Rule::Syntax, "a boolean value"
+            "PRAGMA foreign_keys = maybe;" => Rule::Syntax, "a boolean value",
+        unknown_pragma:
+            "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
 
     test_group_analysis_pass! {

@@ -23,6 +23,9 @@ pub enum Rule {
     /// Source file uses sql features sqlite does not support
     #[value(name = "sqlite/unsupported")]
     SqliteUnsupported,
+    /// Source file uses a PRAGMA not documented by SQLite
+    #[value(name = "sqlite/unknown-pragma")]
+    UnknownPragma,
     /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
     /// from a stricter, conventional SQL model
     #[value(name = "sqlite/quirk")]
@@ -66,6 +69,7 @@ impl mlua::FromLua for Rule {
             "sqleibniz/hook" => Self::Hook,
             "sql/unknown-keyword" => Self::UnknownKeyword,
             "sqlite/unsupported" => Self::SqliteUnsupported,
+            "sqlite/unknown-pragma" => Self::UnknownPragma,
             "sqlite/quirk" => Self::Quirk,
             _ => {
                 return Err(mlua::Error::FromLuaConversionError {
@@ -95,6 +99,7 @@ impl Rule {
             Self::Hook => "sqleibniz/hook",
             Self::UnknownKeyword => "sql/unknown-keyword",
             Self::SqliteUnsupported => "sqlite/unsupported",
+            Self::UnknownPragma => "sqlite/unknown-pragma",
         }
     }
 
@@ -118,6 +123,7 @@ impl Rule {
             Self::Quirk => "Sqlite or SQL quirk: https://www.sqlite.org/quirks.html",
             Self::UnknownKeyword => "Source file contains an unknown keyword",
             Self::SqliteUnsupported => "Source file uses sql features sqlite does not support",
+            Self::UnknownPragma => "Source file uses a PRAGMA not documented by SQLite",
         }
     }
 }

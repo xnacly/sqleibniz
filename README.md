@@ -143,6 +143,7 @@ Options:
           - sqleibniz/bad-instruction:   Source file contains invalid sqleibniz instruction
           - sqleibniz/hook:              User-defined Lua hook reported a diagnostic
           - sqlite/unsupported:         Source file uses sql features sqlite does not support
+          - sqlite/unknown-pragma:      Source file uses a PRAGMA not documented by SQLite
           - sqlite/quirk:                Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates from a stricter, conventional SQL model
           - sql/unterminated-string:     Source file contains an unterminated string
           - sql/unknown-character:       The source file contains an unknown character
@@ -195,6 +196,7 @@ leibniz = {
 
         -- Uncomment sqlite diagnostics to ignore them.
         -- "sqlite/unsupported", -- Source file uses sql features sqlite does not support
+        -- "sqlite/unknown-pragma", -- Source file uses a PRAGMA not documented by SQLite
         -- "sqlite/quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
         -- "sql/unknown-keyword", -- an unknown keyword was encountered
         -- "sql/unterminated-string", -- a not closed string was found

@@ -8,7 +8,16 @@ pub fn pragma(file: &str, pragma: &Pragma) -> Vec<Error> {
     let name = pragma_name(pragma);
 
     let Some(entry) = PRAGMAS.iter().find(|entry| entry.name == name) else {
-        return Vec::new();
+        return vec![
+            Error::new(
+                file,
+                pragma.location,
+                Rule::UnknownPragma,
+                format!("Unknown SQLite PRAGMA `{name}`"),
+                "SQLite ignores unknown PRAGMAs. If this is an extension-defined PRAGMA, disable sqlite/unknown-pragma for this file or project.",
+            )
+            .with_doc_url("https://www.sqlite.org/pragma.html"),
+        ];
     };
 
     let mut diagnostics = Vec::new();
@@ -27,7 +36,8 @@ struct PragmaEntry {
     /// Documented invocation forms for a known SQLite PRAGMA.
     ///
     /// These forms describe the public syntax from https://www.sqlite.org/pragma.html, not the
-    /// generic parser grammar. Unknown or extension pragmas are intentionally not validated.
+    /// generic parser grammar. Names missing from the known-PRAGMA table are reported with
+    /// `sqlite/unknown-pragma`.
     forms: PragmaForms,
     /// Value contract for assignment/call forms.
     ///
@@ -801,13 +811,23 @@ mod tests {
     }
 
     #[test]
-    fn accepts_unknown_pragmas() {
+    fn reports_unknown_pragmas() {
         let diagnostics = pragma(
             "test.sql",
             &pragma_node("some_extension_pragma", PragmaInvocation::Query),
         );
 
-        assert!(diagnostics.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::UnknownPragma);
+        assert!(
+            diagnostics[0]
+                .note
+                .contains("SQLite ignores unknown PRAGMAs")
+        );
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/pragma.html")
+        );
     }
 
     #[test]

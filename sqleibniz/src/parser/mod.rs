@@ -231,6 +231,7 @@ impl<'a> Parser<'a> {
     }
 
     // <signed-number|name|signed-literal>
+    #[cfg_attr(feature = "trace", trace)]
     fn consume_pragma_value(&mut self, invocation_kind: &str) -> Token {
         // PRAGMA values are intentionally token-level here. Known PRAGMA-specific form and value
         // validation happens later in the analyser.
@@ -1725,6 +1726,7 @@ impl<'a> Parser<'a> {
         some_box!(begin)
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn consume_transaction_kind(&mut self) -> Option<Keyword> {
         match self.cur().ttype {
             // DEFERRED | IMMEDIATE | EXCLUSIVE
@@ -1839,6 +1841,7 @@ impl<'a> Parser<'a> {
     }
 
     /// parses an sql expression: https://www.sqlite.org/syntax/expr.html
+    #[cfg_attr(feature = "trace", trace)]
     fn expr(&mut self) -> Option<nodes::Expr> {
         let mut e = nodes::Expr {
             location: Location::from(self.cur()),
@@ -2158,6 +2161,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn foreign_key_action(&mut self) -> Option<ForeignKeyAction> {
         match self.cur().ttype {
             // CASCADE
@@ -2296,6 +2300,7 @@ impl<'a> Parser<'a> {
         Some(fk)
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn parse_column_type(&mut self, def: &mut nodes::ColumnDef) {
         let Type::Ident(name) = self.cur().ttype.clone() else {
             return;
@@ -2323,6 +2328,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn parse_type_name_parameters(&mut self) {
         // skip Type::BraceLeft
         self.advance();
@@ -2337,6 +2343,7 @@ impl<'a> Parser<'a> {
         self.consume(Type::BraceRight);
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn consume_type_name_number(&mut self, message: &str) {
         if let Type::Number(_) = self.cur().ttype {
             self.advance();
@@ -2531,6 +2538,7 @@ impl<'a> Parser<'a> {
         Some(columns)
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn column_constraint(&mut self) -> Option<ColumnConstraint> {
         // CONSTRAINT <name>
         if self.is_keyword(Keyword::CONSTRAINT) {
@@ -2585,6 +2593,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn primary_key_column_constraint(&mut self) -> Option<ColumnConstraint> {
         self.advance();
         self.consume_keyword(Keyword::KEY);
@@ -2601,6 +2610,7 @@ impl<'a> Parser<'a> {
         })
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn default_column_constraint(&mut self) -> Option<ColumnConstraint> {
         self.advance();
         if self.is(Type::BraceLeft) {
@@ -2620,6 +2630,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[cfg_attr(feature = "trace", trace)]
     fn generated_column_constraint(&mut self) -> Option<ColumnConstraint> {
         let mut is_generated = false;
         if self.is_keyword(Keyword::GENERATED) {

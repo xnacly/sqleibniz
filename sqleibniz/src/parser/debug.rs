@@ -61,12 +61,12 @@ impl FieldSerializable for QualifiedTableName {
     }
 }
 
-impl FieldSerializable for ReturningColumn {
+impl FieldSerializable for ResultColumn {
     fn field_as_serializable(&self) -> serde_json::Value {
         match self {
-            ReturningColumn::Star => serde_json::json!({ "star": true }),
-            ReturningColumn::TableStar(table) => serde_json::json!({ "table_star": table }),
-            ReturningColumn::Expr { expr, alias } => serde_json::json!({
+            ResultColumn::Star => serde_json::json!({ "star": true }),
+            ResultColumn::TableStar(table) => serde_json::json!({ "table_star": table }),
+            ResultColumn::Expr { expr, alias } => serde_json::json!({
                 "expr": expr.as_serializable(),
                 "alias": alias,
             }),
@@ -312,11 +312,11 @@ impl_empty_field_hook_contexts!(
     TriggerBodyStmt
 );
 
-impl FieldHookContexts for ReturningColumn {
+impl FieldHookContexts for ResultColumn {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         match self {
-            ReturningColumn::Expr { expr, .. } => expr.field_hook_contexts(),
-            ReturningColumn::Star | ReturningColumn::TableStar(_) => vec![],
+            ResultColumn::Expr { expr, .. } => expr.field_hook_contexts(),
+            ResultColumn::Star | ResultColumn::TableStar(_) => vec![],
         }
     }
 }

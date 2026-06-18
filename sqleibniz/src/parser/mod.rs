@@ -445,6 +445,7 @@ impl<'a> Parser<'a> {
             Type::Keyword(Keyword::INSERT) => self.insert_stmt(),
             Type::Keyword(Keyword::UPDATE) => self.update_stmt(),
             Type::Keyword(Keyword::DELETE) => self.delete_stmt(),
+            Type::Keyword(Keyword::SELECT) => self.select_stmt(),
             Type::Keyword(Keyword::WITH) => self.with_stmt(),
             Type::Keyword(Keyword::DETACH) => self.detach_stmt(),
             Type::Keyword(Keyword::ROLLBACK) => self.rollback_stmt(),
@@ -1669,6 +1670,147 @@ impl<'a> Parser<'a> {
         None
     }
 
+    /// https://www.sqlite.org/lang_select.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn select_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let location = Location::from(self.cur());
+
+        // SELECT [DISTINCT | ALL] <result-column>, ...
+        self.consume_keyword(Keyword::SELECT);
+        if self.is_keyword(Keyword::DISTINCT) || self.is_keyword(Keyword::ALL) {
+            self.push_unimplemented_select_feature(
+                "SELECT DISTINCT/ALL is not yet supported",
+                "https://www.sqlite.org/lang_select.html#removal_of_duplicate_rows_distinct_processing",
+            );
+            return None;
+        }
+        let columns = self.result_column_list()?;
+
+        // FROM <schema-name.table-name|table-name>, ...
+        let from = if self.consume_if_keyword(Keyword::FROM) {
+            self.simple_from_clause()?
+        } else {
+            vec![]
+        };
+
+        // WHERE <expr>
+        let where_expr = self.optional_where_clause()?;
+
+        // GROUP BY <expr> [HAVING <expr>]
+        // TODO: parse GROUP BY/HAVING once aggregate semantics and expression-list stopping are
+        // modelled for SELECT.
+        if self.is_keyword(Keyword::GROUP) || self.is_keyword(Keyword::HAVING) {
+            self.push_unimplemented_select_feature(
+                "SELECT GROUP BY/HAVING is not yet supported",
+                "https://www.sqlite.org/lang_select.html#resultset",
+            );
+            return None;
+        }
+
+        // WINDOW <window-name> AS <window-defn>, ...
+        // TODO: parse window clauses after OVER/window function expressions exist.
+        if self.is_keyword(Keyword::WINDOW) {
+            self.push_unimplemented_select_feature(
+                "SELECT WINDOW clauses are not yet supported",
+                "https://www.sqlite.org/windowfunctions.html",
+            );
+            return None;
+        }
+
+        // ORDER BY <ordering-term>, ...
+        let order_by = self.optional_order_by_clause()?;
+
+        // LIMIT <expr> [OFFSET <expr> | , <expr>]
+        let limit = self.optional_limit_offset_clause()?;
+
+        // compound-operator <select-core>
+        // TODO: parse compound SELECT after select-core is represented separately from select-stmt.
+        if self.is_keyword(Keyword::UNION)
+            || self.is_keyword(Keyword::INTERSECT)
+            || self.is_keyword(Keyword::EXCEPT)
+        {
+            self.push_unimplemented_select_feature(
+                "compound SELECT statements are not yet supported",
+                "https://www.sqlite.org/lang_select.html#compound_select_statements",
+            );
+            return None;
+        }
+
+        self.expect_end("https://www.sqlite.org/lang_select.html");
+
+        some_box!(nodes::Select {
+            location,
+            columns,
+            from,
+            where_expr,
+            order_by,
+            limit,
+        })
+    }
+
+    /// https://www.sqlite.org/syntax/table-or-subquery.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn simple_from_clause(&mut self) -> Option<Vec<nodes::SchemaTableContainer>> {
+        let mut tables = vec![];
+        loop {
+            // <schema-name.table-name|table-name>
+            if self.is(Type::BraceLeft) && self.next_is(Type::Keyword(Keyword::SELECT)) {
+                // TODO: parse FROM subqueries after select-stmt can be embedded as table-or-subquery.
+                self.push_unimplemented_select_feature(
+                    "SELECT FROM subqueries are not yet supported",
+                    "https://www.sqlite.org/syntax/table-or-subquery.html",
+                );
+                return None;
+            }
+            tables.push(self.schema_table_container(Some("table"))?);
+
+            // JOIN <table-or-subquery> ...
+            // TODO: parse joins once table-or-subquery is modelled beyond simple table names.
+            if self.is_keyword(Keyword::JOIN) {
+                self.push_unimplemented_select_feature(
+                    "SELECT JOIN clauses are not yet supported",
+                    "https://www.sqlite.org/syntax/join-clause.html",
+                );
+                return None;
+            }
+
+            // , <schema-name.table-name|table-name>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon)
+                    || self.is_keyword(Keyword::WHERE)
+                    || self.is_keyword(Keyword::GROUP)
+                    || self.is_keyword(Keyword::HAVING)
+                    || self.is_keyword(Keyword::WINDOW)
+                    || self.is_keyword(Keyword::ORDER)
+                    || self.is_keyword(Keyword::LIMIT)
+                {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed SELECT statement",
+                        "SELECT FROM table list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/table-or-subquery.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        Some(tables)
+    }
+
+    /// https://www.sqlite.org/lang_select.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn push_unimplemented_select_feature(&mut self, note: &'static str, doc: &'static str) {
+        let src = Location::from(self.cur());
+        self.push_doc_err("Unimplemented", note, src, Rule::Unimplemented, doc);
+        self.skip_until_semicolon_or_eof();
+    }
+
     /// https://www.sqlite.org/lang_insert.html
     #[cfg_attr(feature = "trace", trace)]
     fn insert_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
@@ -1698,11 +1840,7 @@ impl<'a> Parser<'a> {
         }
 
         // RETURNING <result-column>, ...
-        let returning = if self.consume_if_keyword(Keyword::RETURNING) {
-            self.returning_clause()?
-        } else {
-            vec![]
-        };
+        let returning = self.optional_returning_clause()?;
 
         self.expect_end("https://www.sqlite.org/lang_insert.html");
 
@@ -2136,9 +2274,9 @@ impl<'a> Parser<'a> {
 
     /// https://www.sqlite.org/syntax/returning-clause.html
     #[cfg_attr(feature = "trace", trace)]
-    fn optional_returning_clause(&mut self) -> Option<Vec<nodes::ReturningColumn>> {
+    fn optional_returning_clause(&mut self) -> Option<Vec<nodes::ResultColumn>> {
         if self.consume_if_keyword(Keyword::RETURNING) {
-            self.returning_clause()
+            self.result_column_list()
         } else {
             Some(vec![])
         }
@@ -2165,27 +2303,32 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/returning-clause.html
+    /// https://www.sqlite.org/syntax/result-column.html
     #[cfg_attr(feature = "trace", trace)]
-    fn returning_clause(&mut self) -> Option<Vec<nodes::ReturningColumn>> {
+    fn result_column_list(&mut self) -> Option<Vec<nodes::ResultColumn>> {
         let mut columns = vec![];
         loop {
-            // <returning-column>
-            columns.push(self.returning_column()?);
+            // <result-column>
+            columns.push(self.result_column()?);
 
-            // , <returning-column>
+            // , <result-column>
             if self.consume_if(Type::Comma) {
                 if self.is(Type::Semicolon)
+                    || self.is_keyword(Keyword::FROM)
+                    || self.is_keyword(Keyword::WHERE)
+                    || self.is_keyword(Keyword::GROUP)
+                    || self.is_keyword(Keyword::HAVING)
+                    || self.is_keyword(Keyword::WINDOW)
                     || self.is_keyword(Keyword::ORDER)
                     || self.is_keyword(Keyword::LIMIT)
                 {
                     let src = Location::from(self.cur());
                     self.push_doc_err(
-                        "Malformed RETURNING clause",
-                        "RETURNING column list has a trailing comma",
+                        "Malformed result column list",
+                        "result column list has a trailing comma",
                         src,
                         Rule::Syntax,
-                        "https://www.sqlite.org/syntax/returning-clause.html",
+                        "https://www.sqlite.org/syntax/result-column.html",
                     );
                     break;
                 }
@@ -2198,12 +2341,12 @@ impl<'a> Parser<'a> {
         Some(columns)
     }
 
-    /// https://www.sqlite.org/syntax/returning-clause.html
+    /// https://www.sqlite.org/syntax/result-column.html
     #[cfg_attr(feature = "trace", trace)]
-    fn returning_column(&mut self) -> Option<nodes::ReturningColumn> {
+    fn result_column(&mut self) -> Option<nodes::ResultColumn> {
         // *
         if self.consume_if(Type::Asterisk) {
-            return Some(nodes::ReturningColumn::Star);
+            return Some(nodes::ResultColumn::Star);
         }
 
         // <table-name>.*
@@ -2212,11 +2355,19 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.advance();
                 self.advance();
-                return Some(nodes::ReturningColumn::TableStar(table));
+                return Some(nodes::ResultColumn::TableStar(table));
             }
         }
 
         // <expr> [AS <column-alias>]
+        if self.is(Type::BraceLeft) && self.next_is(Type::Keyword(Keyword::SELECT)) {
+            // TODO: parse scalar subqueries after SELECT can be represented inside expressions.
+            self.push_unimplemented_select_feature(
+                "SELECT subqueries in result columns are not yet supported",
+                "https://www.sqlite.org/lang_expr.html#subquery_expressions",
+            );
+            return None;
+        }
         let expr = self.expr()?;
         let alias = if self.consume_if_keyword(Keyword::AS) {
             Some(self.consume_ident(
@@ -2227,7 +2378,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        Some(nodes::ReturningColumn::Expr { expr, alias })
+        Some(nodes::ResultColumn::Expr { expr, alias })
     }
 
     /// https://www.sqlite.org/syntax/ordering-term.html

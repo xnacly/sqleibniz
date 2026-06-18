@@ -71,7 +71,7 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`release-stmt`](https://www.sqlite.org/lang_savepoint.html)               | ✅              | ❌                | `RELEASE SAVEPOINT latest_savepoint;`                     |
 | [`rollback-stmt`](https://www.sqlite.org/lang_transaction.html)            | ✅              | ❌                | `ROLLBACK TO latest_savepoint;`                           |
 | [`savepoint-stmt`](https://www.sqlite.org/lang_savepoint.html)             | ✅              | ❌                | `SAVEPOINT latest_savepoint;`                             |
-| [`select-stmt`](https://www.sqlite.org/lang_select.html)                   | ❌              | ❌                |                                                           |
+| [`select-stmt`](https://www.sqlite.org/lang_select.html)                   | ✅              | ❌                | `SELECT id FROM users WHERE active = true;`               |
 | [`update-stmt`](https://www.sqlite.org/lang_update.html)                   | ✅              | ❌                | `UPDATE users SET name = 'Ada' WHERE id = 1;`             |
 | [`vacuum-stmt`](https://www.sqlite.org/lang_vacuum.html)                   | ✅              | ❌                | `VACUUM INTO 'repacked.db';`                              |
 

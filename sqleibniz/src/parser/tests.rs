@@ -42,8 +42,8 @@ mod should_pass {
     use crate::{
         parser::nodes::{
             Alter, ColumnConstraint, ColumnDef, Delete, Expr, Insert, InsertSource, LimitOffset,
-            OrderingTerm, QualifiedTableIndex, QualifiedTableName, ReturningColumn,
-            SchemaTableContainer, Update, UpdateAssignment,
+            OrderingTerm, QualifiedTableIndex, QualifiedTableName, ResultColumn,
+            SchemaTableContainer, Select, Update, UpdateAssignment,
         },
         types::{Keyword, Token, Type, storage::SqliteStorageClass},
     };
@@ -124,7 +124,7 @@ mod should_pass {
     fn delete(
         target: QualifiedTableName,
         where_expr: Option<Expr>,
-        returning: Vec<ReturningColumn>,
+        returning: Vec<ResultColumn>,
         order_by: Vec<OrderingTerm>,
         limit: Option<LimitOffset>,
     ) -> Vec<Delete> {
@@ -136,7 +136,7 @@ mod should_pass {
         target: SchemaTableContainer,
         columns: Vec<String>,
         source: InsertSource,
-        returning: Vec<ReturningColumn>,
+        returning: Vec<ResultColumn>,
     ) -> Vec<Insert> {
         vec![Insert::new(conflict, target, columns, source, returning)]
     }
@@ -146,7 +146,7 @@ mod should_pass {
         target: QualifiedTableName,
         assignments: Vec<UpdateAssignment>,
         where_expr: Option<Expr>,
-        returning: Vec<ReturningColumn>,
+        returning: Vec<ResultColumn>,
         order_by: Vec<OrderingTerm>,
         limit: Option<LimitOffset>,
     ) -> Vec<Update> {
@@ -166,6 +166,16 @@ mod should_pass {
             columns: columns.into_iter().map(String::from).collect(),
             expr,
         }
+    }
+
+    fn select(
+        columns: Vec<ResultColumn>,
+        from: Vec<SchemaTableContainer>,
+        where_expr: Option<Expr>,
+        order_by: Vec<OrderingTerm>,
+        limit: Option<LimitOffset>,
+    ) -> Vec<Select> {
+        vec![Select::new(columns, from, where_expr, order_by, limit)]
     }
 
     test_group_pass_assert! {
@@ -340,10 +350,10 @@ mod should_pass {
             qtable(SchemaTableContainer::Table("users".into())),
             Some(op("=", vec![col("id"), num(1.0)])),
             vec![
-                ReturningColumn::Star,
-                ReturningColumn::TableStar("users".into()),
-                ReturningColumn::Expr { expr: col("id"), alias: Some("deleted_id".into()) },
-                ReturningColumn::Expr { expr: col("name"), alias: None },
+                ResultColumn::Star,
+                ResultColumn::TableStar("users".into()),
+                ResultColumn::Expr { expr: col("id"), alias: Some("deleted_id".into()) },
+                ResultColumn::Expr { expr: col("name"), alias: None },
             ],
             vec![],
             None,
@@ -420,8 +430,8 @@ mod should_pass {
             vec!["id".into()],
             InsertSource::Values(vec![vec![num(1.0)]]),
             vec![
-                ReturningColumn::Star,
-                ReturningColumn::Expr { expr: col("id"), alias: Some("inserted_id".into()) },
+                ResultColumn::Star,
+                ResultColumn::Expr { expr: col("id"), alias: Some("inserted_id".into()) },
             ],
         )
     }
@@ -508,11 +518,72 @@ mod should_pass {
             vec![assignment(vec!["active"], lit(Type::Boolean(false)))],
             Some(op("<", vec![col("last_seen"), num(10.0)])),
             vec![
-                ReturningColumn::Star,
-                ReturningColumn::Expr { expr: col("id"), alias: Some("updated_id".into()) },
+                ResultColumn::Star,
+                ResultColumn::Expr { expr: col("id"), alias: Some("updated_id".into()) },
             ],
             vec![OrderingTerm { expr: col("last_seen"), order: Some(Keyword::DESC), nulls: None }],
             Some(LimitOffset { limit: num(5.0), offset: Some(num(2.0)) }),
+        )
+    }
+
+    test_group_pass_assert! {
+        select_stmt,
+
+        select_literal:
+        r"SELECT 1;"=select(
+            vec![ResultColumn::Expr { expr: num(1.0), alias: None }],
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_columns_from_table_where:
+        r"SELECT id, name FROM users WHERE active = true;"=select(
+            vec![
+                ResultColumn::Expr { expr: col("id"), alias: None },
+                ResultColumn::Expr { expr: col("name"), alias: None },
+            ],
+            vec![SchemaTableContainer::Table("users".into())],
+            Some(op("=", vec![col("active"), lit(Type::Boolean(true))])),
+            vec![],
+            None,
+        ),
+
+        select_star_and_table_star:
+        r"SELECT *, users.* FROM main.users;"=select(
+            vec![ResultColumn::Star, ResultColumn::TableStar("users".into())],
+            vec![SchemaTableContainer::SchemaAndTable { schema: "main".into(), table: "users".into() }],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_expr_alias_order_limit:
+        r"SELECT id AS user_id, lower(name) AS normalized FROM users ORDER BY id DESC LIMIT 10 OFFSET 5;"=select(
+            vec![
+                ResultColumn::Expr { expr: col("id"), alias: Some("user_id".into()) },
+                ResultColumn::Expr {
+                    expr: Expr::new(None, None, None, None, None, Some("lower".into()), None, vec![col("name")]),
+                    alias: Some("normalized".into()),
+                },
+            ],
+            vec![SchemaTableContainer::Table("users".into())],
+            None,
+            vec![OrderingTerm { expr: col("id"), order: Some(Keyword::DESC), nulls: None }],
+            Some(LimitOffset { limit: num(10.0), offset: Some(num(5.0)) }),
+        ),
+
+        select_multiple_from_tables:
+        r"SELECT id FROM users, archived_users;"=select(
+            vec![ResultColumn::Expr { expr: col("id"), alias: None }],
+            vec![
+                SchemaTableContainer::Table("users".into()),
+                SchemaTableContainer::Table("archived_users".into()),
+            ],
+            None,
+            vec![],
+            None,
         )
     }
 
@@ -2133,7 +2204,7 @@ mod should_fail {
         delete_missing_table: "DELETE FROM;" => Rule::Syntax, "expected either schema_name.table or table",
         delete_indexed_missing_by: "DELETE FROM users INDEXED idx;" => Rule::Syntax, "Wanted Keyword(BY)",
         delete_not_indexed_missing_indexed: "DELETE FROM users NOT idx;" => Rule::Syntax, "Wanted Keyword(INDEXED)",
-        delete_returning_trailing_comma: "DELETE FROM users RETURNING id,;" => Rule::Syntax, "RETURNING column list has a trailing comma",
+        delete_returning_trailing_comma: "DELETE FROM users RETURNING id,;" => Rule::Syntax, "result column list has a trailing comma",
         delete_order_by_trailing_comma: "DELETE FROM users ORDER BY id, LIMIT 1;" => Rule::Syntax, "ORDER BY term list has a trailing comma",
         delete_order_by_nulls_invalid: "DELETE FROM users ORDER BY id NULLS NO;" => Rule::Syntax, "Wanted FIRST or LAST after NULLS",
         delete_with_select_unimplemented: "WITH stale AS (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
@@ -2160,10 +2231,18 @@ mod should_fail {
         update_column_list_trailing_comma: "UPDATE users SET (name,) = user_defaults();" => Rule::Syntax, "column list has a trailing comma",
         update_from_unimplemented: "UPDATE users SET name = old_users.name FROM old_users WHERE users.id = old_users.id;" => Rule::Unimplemented, "UPDATE FROM is not yet supported",
         update_with_select_unimplemented: "WITH stale AS (SELECT 1) UPDATE users SET name = 'Ada';" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
+        select_trailing_result_column: "SELECT id, FROM users;" => Rule::Syntax, "result column list has a trailing comma",
+        select_from_trailing_comma: "SELECT id FROM users, WHERE active = true;" => Rule::Syntax, "SELECT FROM table list has a trailing comma",
+        select_distinct_unimplemented: "SELECT DISTINCT id FROM users;" => Rule::Unimplemented, "SELECT DISTINCT/ALL is not yet supported",
+        select_join_unimplemented: "SELECT id FROM users JOIN teams;" => Rule::Unimplemented, "SELECT JOIN clauses are not yet supported",
+        select_group_by_unimplemented: "SELECT team_id FROM users GROUP BY team_id;" => Rule::Unimplemented, "SELECT GROUP BY/HAVING is not yet supported",
+        select_window_unimplemented: "SELECT id FROM users WINDOW win AS ();" => Rule::Unimplemented, "SELECT WINDOW clauses are not yet supported",
+        select_compound_unimplemented: "SELECT id FROM users UNION SELECT id FROM archived_users;" => Rule::Unimplemented, "compound SELECT statements are not yet supported",
+        select_result_subquery_unimplemented: "SELECT (SELECT 1);" => Rule::Unimplemented, "SELECT subqueries in result columns are not yet supported",
+        select_from_subquery_unimplemented: "SELECT id FROM (SELECT id FROM users);" => Rule::Unimplemented, "SELECT FROM subqueries are not yet supported",
 
         // sql_stmt dispatch
         unknown_keyword_suggestion: "usrs;" => Rule::UnknownKeyword, "did you mean one of",
-        unimplemented_keyword: "SELECT 1;" => Rule::Unimplemented, "can not yet analyse",
         literal_cannot_start_statement: "12;" => Rule::Syntax, "can not start a statement",
 
         // create_stmt dispatch

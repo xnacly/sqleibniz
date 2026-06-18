@@ -143,6 +143,12 @@ UPDATE OR FAIL main.users SET name = 'Ada' WHERE id = 1;
 UPDATE users AS u NOT INDEXED SET name = 'Ada' WHERE u.id = 1;
 UPDATE users SET active = false WHERE last_seen < 10 RETURNING *, id AS updated_id ORDER BY last_seen DESC LIMIT 5 OFFSET 2;
 
+-- https://www.sqlite.org/lang_select.html
+SELECT 1;
+SELECT id, name FROM users WHERE active = true;
+SELECT *, users.* FROM main.users;
+SELECT id AS user_id, lower(name) AS normalized FROM users ORDER BY id DESC LIMIT 10 OFFSET 5;
+
 -- https://www.sqlite.org/pragma.html
 PRAGMA database_list;
 PRAGMA schema.cache_size = 5;

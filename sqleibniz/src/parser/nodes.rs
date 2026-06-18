@@ -131,7 +131,6 @@ node!(
     r"Literal value, see: https://www.sqlite.org/lang_expr.html#literal_values_constants_
 
 A literal value represents a constant. Literal values may be integers, floating point numbers, strings, BLOBs, or NULLs.
-Which kind a literal is, is encoded in the Nodes token.
 ",
     value: Token
 );
@@ -145,15 +144,13 @@ These can take several forms:
 
 - `?NNN`: A question mark followed by a number NNN holds a spot for the NNN-th parameter.
 - `?`: A question mark that is not followed by a number creates a parameter with a number one
-  greater than the largest parameter number already assigned. (Discouraged - in sqleibniz, this format
-  produces an Error)
+  greater than the largest parameter number already assigned.
 - `:AAAA`: A colon followed by an identifier name holds a spot for a named parameter with the name
   `:AAAA`
 - `@AAAA`: An 'at' sign works exactly like a colon, except that the name of the parameter created
   is @AAAA.
 - `$AAAA`: A dollar-sign followed by an identifier name also holds a spot for a named parameter
-  with the name $AAAA. Sqlite allows everything to follow after '$()', sqleibniz forbids this via
-  Rule::Quirks errors
+  with the name $AAAA.
 ",
     counter: Option<Box<dyn Node>>,
     name: Option<String>
@@ -381,7 +378,7 @@ pub struct QualifiedTableName {
 }
 
 #[derive(Debug)]
-pub enum ReturningColumn {
+pub enum ResultColumn {
     Star,
     TableStar(String),
     Expr { expr: Expr, alias: Option<String> },
@@ -400,6 +397,25 @@ pub struct LimitOffset {
     pub offset: Option<Expr>,
 }
 
+node!(
+    Select,
+    r"SELECT statement, see: https://www.sqlite.org/lang_select.html
+
+The SELECT command reads data from expressions and tables.
+
+```sql
+SELECT 1;
+SELECT id, name FROM users WHERE active = true;
+SELECT users.* FROM users ORDER BY id LIMIT 10;
+```
+",
+    columns: Vec<ResultColumn>,
+    from: Vec<SchemaTableContainer>,
+    where_expr: Option<Expr>,
+    order_by: Vec<OrderingTerm>,
+    limit: Option<LimitOffset>
+);
+
 #[derive(Debug)]
 pub enum InsertSource {
     DefaultValues,
@@ -416,10 +432,7 @@ node!(
     Update,
     r"UPDATE statement, see: https://www.sqlite.org/lang_update.html
 
-The UPDATE command changes existing rows in a table. This node represents SQLite's UPDATE
-statement forms that do not require table-source parsing: conflict algorithms, qualified table
-targets, SET assignments, WHERE, RETURNING, ORDER BY, and LIMIT. UPDATE FROM produces an
-unsupported diagnostic until table-or-subquery parsing exists.
+The UPDATE command changes existing rows in a table.
 
 ```sql
 UPDATE table_name SET column_name = 'value';
@@ -431,7 +444,7 @@ UPDATE users SET (name, email) = user_defaults();
     target: QualifiedTableName,
     assignments: Vec<UpdateAssignment>,
     where_expr: Option<Expr>,
-    returning: Vec<ReturningColumn>,
+    returning: Vec<ResultColumn>,
     order_by: Vec<OrderingTerm>,
     limit: Option<LimitOffset>
 );
@@ -440,10 +453,7 @@ node!(
     Insert,
     r"INSERT statement, see: https://www.sqlite.org/lang_insert.html
 
-The INSERT command creates new rows in a table. This node represents SQLite's INSERT statement
-forms that do not require select-stmt support: DEFAULT VALUES and VALUES rows, with optional
-column lists, conflict algorithms, and RETURNING clauses. SELECT-backed INSERT and UPSERT clauses
-produce unsupported diagnostics until those grammar branches are modelled.
+The INSERT command creates new rows in a table.
 
 ```sql
 INSERT INTO table_name DEFAULT VALUES;
@@ -455,17 +465,14 @@ INSERT OR IGNORE INTO schema_name.table_name VALUES (1) RETURNING *;
     target: SchemaTableContainer,
     columns: Vec<String>,
     source: InsertSource,
-    returning: Vec<ReturningColumn>
+    returning: Vec<ResultColumn>
 );
 
 node!(
     Delete,
     r"DELETE statement, see: https://www.sqlite.org/lang_delete.html
 
-The DELETE command removes records from a table. This node represents SQLite's DELETE statement
-envelope after `DELETE FROM`: qualified table metadata, WHERE, RETURNING, ORDER BY, and LIMIT
-clauses. `WITH` is recognized by the parser only so SELECT-based common table expressions can
-produce a precise unsupported diagnostic until SELECT parsing exists.
+The DELETE command removes records from a table.
 
 ```sql
 DELETE FROM table_name;
@@ -475,7 +482,7 @@ DELETE FROM users AS u INDEXED BY idx_users_id WHERE u.id = 1 RETURNING *;
 ",
     target: QualifiedTableName,
     where_expr: Option<Expr>,
-    returning: Vec<ReturningColumn>,
+    returning: Vec<ResultColumn>,
     order_by: Vec<OrderingTerm>,
     limit: Option<LimitOffset>
 );
@@ -672,8 +679,7 @@ node!(
     CreateTable,
     r"CREATE TABLE statement, see: https://www.sqlite.org/lang_createtable.html
 
-The CREATE TABLE command creates a new table in an SQLite database. This node represents the
-column-list form:
+The CREATE TABLE command creates a new table in an SQLite database.
 
 ```sql
 CREATE TABLE table_name (column_def, ...);
@@ -702,8 +708,7 @@ node!(
     CreateIndex,
     r"CREATE INDEX statement, see: https://www.sqlite.org/lang_createindex.html
 
-The CREATE INDEX command creates a new index for a table. This node currently represents column
-indexes:
+The CREATE INDEX command creates a new index for a table.
 
 ```sql
 CREATE INDEX index_name ON table_name (column_name);
@@ -772,13 +777,8 @@ node!(
     Pragma,
     r"PRAGMA Statements, see: https://www.sqlite.org/pragma.html
 
-The PRAGMA statement is an SQL extension specific to SQLite and used to modify the operation of the SQLite library or to query the SQLite library for internal (non-table) data
-
-sqleibniz parses the generic PRAGMA statement shape first, then analyses known SQLite PRAGMAs against the invocation forms and value categories documented on the SQLite PRAGMA page. Unknown or extension PRAGMAs stay parseable but produce `sqlite/unknown-pragma` diagnostics. Optional schema prefixes are ignored for validation, so `PRAGMA main.wal_checkpoint(FULL);` is validated as `wal_checkpoint`.
-
-Known PRAGMAs are validated as query form (`PRAGMA name;`), assignment form (`PRAGMA name = value;`), call form (`PRAGMA name(value);`), or documented combinations of those forms. Value validation is token-level: booleans, integers, names, text values, and documented named option sets are checked, while runtime constraints such as database state or compile-time SQLite options are left to SQLite.
-
-sqleibniz also reports diagnostics for known deprecated or risky PRAGMA usage.
+The PRAGMA statement is an SQL extension specific to SQLite. PRAGMAs modify SQLite library
+operation or query SQLite for internal, non-table data.
 
 # Examples
 

@@ -46,6 +46,8 @@ impl_field_serializable_with_serde_to_value!(
     PragmaInvocation,
     IndexedColumn,
     QualifiedTableIndex,
+    SelectQuantifier,
+    JoinOperator,
     TriggerTiming,
     TriggerEvent,
     TriggerBodyStmt
@@ -69,6 +71,38 @@ impl FieldSerializable for ResultColumn {
             ResultColumn::Expr { expr, alias } => serde_json::json!({
                 "expr": expr.as_serializable(),
                 "alias": alias,
+            }),
+        }
+    }
+}
+
+impl FieldSerializable for SelectTable {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "alias": self.alias,
+        })
+    }
+}
+
+impl FieldSerializable for SelectSource {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        match self {
+            SelectSource::Table(table) => serde_json::json!({
+                "table": table.field_as_serializable(),
+            }),
+            SelectSource::Join {
+                left,
+                operator,
+                right,
+                on,
+            } => serde_json::json!({
+                "join": {
+                    "left": left.field_as_serializable(),
+                    "operator": operator,
+                    "right": right.field_as_serializable(),
+                    "on": on.as_ref().map(|expr| expr.as_serializable()),
+                }
             }),
         }
     }
@@ -306,6 +340,9 @@ impl_empty_field_hook_contexts!(
     SchemaTableContainer,
     IndexedColumn,
     QualifiedTableIndex,
+    SelectQuantifier,
+    JoinOperator,
+    SelectTable,
     QualifiedTableName,
     TriggerTiming,
     TriggerEvent,
@@ -317,6 +354,21 @@ impl FieldHookContexts for ResultColumn {
         match self {
             ResultColumn::Expr { expr, .. } => expr.field_hook_contexts(),
             ResultColumn::Star | ResultColumn::TableStar(_) => vec![],
+        }
+    }
+}
+
+impl FieldHookContexts for SelectSource {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            SelectSource::Table(_) => vec![],
+            SelectSource::Join { left, on, .. } => {
+                let mut contexts = left.field_hook_contexts();
+                if let Some(on) = on {
+                    contexts.extend(on.field_hook_contexts());
+                }
+                contexts
+            }
         }
     }
 }

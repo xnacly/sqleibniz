@@ -121,7 +121,10 @@ fn sarif_omits_disabled_rules() {
 
 #[test]
 fn human_summary_groups_ignored_diagnostics_by_rule() {
-    let file = temp_sql("ignored-summary", "SELECT DISTINCT id;\nSELECT DISTINCT id;");
+    let file = temp_sql(
+        "ignored-summary",
+        "SELECT id FROM users RIGHT JOIN teams;\nSELECT id FROM users RIGHT JOIN teams;",
+    );
 
     let output = sqleibniz(&[
         arg("--ignore-config"),

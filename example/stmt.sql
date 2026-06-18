@@ -148,6 +148,8 @@ SELECT 1;
 SELECT id, name FROM users WHERE active = true;
 SELECT *, users.* FROM main.users;
 SELECT id AS user_id, lower(name) AS normalized FROM users ORDER BY id DESC LIMIT 10 OFFSET 5;
+SELECT DISTINCT team_id FROM users GROUP BY team_id HAVING count(id) > 1;
+SELECT u.id FROM users AS u LEFT OUTER JOIN teams AS t ON u.team_id = t.id;
 
 -- https://www.sqlite.org/pragma.html
 PRAGMA database_list;

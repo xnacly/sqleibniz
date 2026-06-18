@@ -41,9 +41,10 @@ macro_rules! test_group_pass_assert {
 mod should_pass {
     use crate::{
         parser::nodes::{
-            Alter, ColumnConstraint, ColumnDef, Delete, Expr, Insert, InsertSource, LimitOffset,
-            OrderingTerm, QualifiedTableIndex, QualifiedTableName, ResultColumn,
-            SchemaTableContainer, Select, Update, UpdateAssignment,
+            Alter, ColumnConstraint, ColumnDef, Delete, Expr, Insert, InsertSource, JoinOperator,
+            LimitOffset, OrderingTerm, QualifiedTableIndex, QualifiedTableName, ResultColumn,
+            SchemaTableContainer, Select, SelectQuantifier, SelectSource, SelectTable, Update,
+            UpdateAssignment,
         },
         types::{Keyword, Token, Type, storage::SqliteStorageClass},
     };
@@ -169,13 +170,43 @@ mod should_pass {
     }
 
     fn select(
+        quantifier: Option<SelectQuantifier>,
         columns: Vec<ResultColumn>,
-        from: Vec<SchemaTableContainer>,
+        from: Vec<SelectSource>,
         where_expr: Option<Expr>,
+        group_by: Vec<Expr>,
+        having: Option<Expr>,
         order_by: Vec<OrderingTerm>,
         limit: Option<LimitOffset>,
     ) -> Vec<Select> {
-        vec![Select::new(columns, from, where_expr, order_by, limit)]
+        vec![Select::new(
+            quantifier, columns, from, where_expr, group_by, having, order_by, limit,
+        )]
+    }
+
+    fn stable(name: SchemaTableContainer) -> SelectSource {
+        SelectSource::Table(SelectTable { name, alias: None })
+    }
+
+    fn stable_alias(name: SchemaTableContainer, alias: &str) -> SelectSource {
+        SelectSource::Table(SelectTable {
+            name,
+            alias: Some(alias.into()),
+        })
+    }
+
+    fn sjoin(
+        left: SelectSource,
+        operator: JoinOperator,
+        right: SelectTable,
+        on: Option<Expr>,
+    ) -> SelectSource {
+        SelectSource::Join {
+            left: Box::new(left),
+            operator,
+            right,
+            on,
+        }
     }
 
     test_group_pass_assert! {
@@ -531,7 +562,10 @@ mod should_pass {
 
         select_literal:
         r"SELECT 1;"=select(
+            None,
             vec![ResultColumn::Expr { expr: num(1.0), alias: None }],
+            vec![],
+            None,
             vec![],
             None,
             vec![],
@@ -540,20 +574,26 @@ mod should_pass {
 
         select_columns_from_table_where:
         r"SELECT id, name FROM users WHERE active = true;"=select(
+            None,
             vec![
                 ResultColumn::Expr { expr: col("id"), alias: None },
                 ResultColumn::Expr { expr: col("name"), alias: None },
             ],
-            vec![SchemaTableContainer::Table("users".into())],
+            vec![stable(SchemaTableContainer::Table("users".into()))],
             Some(op("=", vec![col("active"), lit(Type::Boolean(true))])),
+            vec![],
+            None,
             vec![],
             None,
         ),
 
         select_star_and_table_star:
         r"SELECT *, users.* FROM main.users;"=select(
+            None,
             vec![ResultColumn::Star, ResultColumn::TableStar("users".into())],
-            vec![SchemaTableContainer::SchemaAndTable { schema: "main".into(), table: "users".into() }],
+            vec![stable(SchemaTableContainer::SchemaAndTable { schema: "main".into(), table: "users".into() })],
+            None,
+            vec![],
             None,
             vec![],
             None,
@@ -561,6 +601,7 @@ mod should_pass {
 
         select_expr_alias_order_limit:
         r"SELECT id AS user_id, lower(name) AS normalized FROM users ORDER BY id DESC LIMIT 10 OFFSET 5;"=select(
+            None,
             vec![
                 ResultColumn::Expr { expr: col("id"), alias: Some("user_id".into()) },
                 ResultColumn::Expr {
@@ -568,7 +609,9 @@ mod should_pass {
                     alias: Some("normalized".into()),
                 },
             ],
-            vec![SchemaTableContainer::Table("users".into())],
+            vec![stable(SchemaTableContainer::Table("users".into()))],
+            None,
+            vec![],
             None,
             vec![OrderingTerm { expr: col("id"), order: Some(Keyword::DESC), nulls: None }],
             Some(LimitOffset { limit: num(10.0), offset: Some(num(5.0)) }),
@@ -576,11 +619,165 @@ mod should_pass {
 
         select_multiple_from_tables:
         r"SELECT id FROM users, archived_users;"=select(
+            None,
             vec![ResultColumn::Expr { expr: col("id"), alias: None }],
             vec![
-                SchemaTableContainer::Table("users".into()),
-                SchemaTableContainer::Table("archived_users".into()),
+                stable(SchemaTableContainer::Table("users".into())),
+                stable(SchemaTableContainer::Table("archived_users".into())),
             ],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_distinct:
+        r"SELECT DISTINCT id FROM users;"=select(
+            Some(SelectQuantifier::Distinct),
+            vec![ResultColumn::Expr { expr: col("id"), alias: None }],
+            vec![stable(SchemaTableContainer::Table("users".into()))],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_all_with_table_alias:
+        r"SELECT ALL u.id FROM users AS u;"=select(
+            Some(SelectQuantifier::All),
+            vec![ResultColumn::Expr {
+                expr: Expr::new(None, None, None, Some("u".into()), Some("id".into()), None, None, vec![]),
+                alias: None,
+            }],
+            vec![stable_alias(SchemaTableContainer::Table("users".into()), "u")],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_group_by_having:
+        r"SELECT team_id FROM users GROUP BY team_id HAVING count(id) > 1;"=select(
+            None,
+            vec![ResultColumn::Expr { expr: col("team_id"), alias: None }],
+            vec![stable(SchemaTableContainer::Table("users".into()))],
+            None,
+            vec![col("team_id")],
+            Some(op(">", vec![
+                Expr::new(None, None, None, None, None, Some("count".into()), None, vec![col("id")]),
+                num(1.0),
+            ])),
+            vec![],
+            None,
+        ),
+
+        select_group_by:
+        r"SELECT team_id FROM users GROUP BY team_id;"=select(
+            None,
+            vec![ResultColumn::Expr { expr: col("team_id"), alias: None }],
+            vec![stable(SchemaTableContainer::Table("users".into()))],
+            None,
+            vec![col("team_id")],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_inner_join_on:
+        r"SELECT users.id FROM users JOIN teams ON users.team_id = teams.id;"=select(
+            None,
+            vec![ResultColumn::Expr {
+                expr: Expr::new(None, None, None, Some("users".into()), Some("id".into()), None, None, vec![]),
+                alias: None,
+            }],
+            vec![sjoin(
+                stable(SchemaTableContainer::Table("users".into())),
+                JoinOperator::Inner,
+                SelectTable { name: SchemaTableContainer::Table("teams".into()), alias: None },
+                Some(op("=", vec![
+                    Expr::new(None, None, None, Some("users".into()), Some("team_id".into()), None, None, vec![]),
+                    Expr::new(None, None, None, Some("teams".into()), Some("id".into()), None, None, vec![]),
+                ])),
+            )],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_inner_join_keyword:
+        r"SELECT id FROM users INNER JOIN teams;"=select(
+            None,
+            vec![ResultColumn::Expr { expr: col("id"), alias: None }],
+            vec![sjoin(
+                stable(SchemaTableContainer::Table("users".into())),
+                JoinOperator::Inner,
+                SelectTable { name: SchemaTableContainer::Table("teams".into()), alias: None },
+                None,
+            )],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_left_join:
+        r"SELECT id FROM users LEFT JOIN teams;"=select(
+            None,
+            vec![ResultColumn::Expr { expr: col("id"), alias: None }],
+            vec![sjoin(
+                stable(SchemaTableContainer::Table("users".into())),
+                JoinOperator::Left,
+                SelectTable { name: SchemaTableContainer::Table("teams".into()), alias: None },
+                None,
+            )],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_left_outer_join_alias:
+        r"SELECT u.id FROM users u LEFT OUTER JOIN teams AS t ON u.team_id = t.id;"=select(
+            None,
+            vec![ResultColumn::Expr {
+                expr: Expr::new(None, None, None, Some("u".into()), Some("id".into()), None, None, vec![]),
+                alias: None,
+            }],
+            vec![sjoin(
+                stable_alias(SchemaTableContainer::Table("users".into()), "u"),
+                JoinOperator::LeftOuter,
+                SelectTable { name: SchemaTableContainer::Table("teams".into()), alias: Some("t".into()) },
+                Some(op("=", vec![
+                    Expr::new(None, None, None, Some("u".into()), Some("team_id".into()), None, None, vec![]),
+                    Expr::new(None, None, None, Some("t".into()), Some("id".into()), None, None, vec![]),
+                ])),
+            )],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        ),
+
+        select_cross_join:
+        r"SELECT id FROM users CROSS JOIN teams;"=select(
+            None,
+            vec![ResultColumn::Expr { expr: col("id"), alias: None }],
+            vec![sjoin(
+                stable(SchemaTableContainer::Table("users".into())),
+                JoinOperator::Cross,
+                SelectTable { name: SchemaTableContainer::Table("teams".into()), alias: None },
+                None,
+            )],
+            None,
+            vec![],
             None,
             vec![],
             None,
@@ -2233,9 +2430,11 @@ mod should_fail {
         update_with_select_unimplemented: "WITH stale AS (SELECT 1) UPDATE users SET name = 'Ada';" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
         select_trailing_result_column: "SELECT id, FROM users;" => Rule::Syntax, "result column list has a trailing comma",
         select_from_trailing_comma: "SELECT id FROM users, WHERE active = true;" => Rule::Syntax, "SELECT FROM table list has a trailing comma",
-        select_distinct_unimplemented: "SELECT DISTINCT id FROM users;" => Rule::Unimplemented, "SELECT DISTINCT/ALL is not yet supported",
-        select_join_unimplemented: "SELECT id FROM users JOIN teams;" => Rule::Unimplemented, "SELECT JOIN clauses are not yet supported",
-        select_group_by_unimplemented: "SELECT team_id FROM users GROUP BY team_id;" => Rule::Unimplemented, "SELECT GROUP BY/HAVING is not yet supported",
+        select_group_by_trailing_comma: "SELECT team_id FROM users GROUP BY team_id, ORDER BY team_id;" => Rule::Syntax, "SELECT GROUP BY expression list has a trailing comma",
+        select_natural_join_unimplemented: "SELECT id FROM users NATURAL JOIN teams;" => Rule::Unimplemented, "this SELECT JOIN operator is not yet supported",
+        select_right_join_unimplemented: "SELECT id FROM users RIGHT JOIN teams;" => Rule::Unimplemented, "this SELECT JOIN operator is not yet supported",
+        select_full_join_unimplemented: "SELECT id FROM users FULL JOIN teams;" => Rule::Unimplemented, "this SELECT JOIN operator is not yet supported",
+        select_chained_join_unimplemented: "SELECT id FROM users JOIN teams JOIN orgs;" => Rule::Unimplemented, "chained SELECT JOIN clauses are not yet supported",
         select_window_unimplemented: "SELECT id FROM users WINDOW win AS ();" => Rule::Unimplemented, "SELECT WINDOW clauses are not yet supported",
         select_compound_unimplemented: "SELECT id FROM users UNION SELECT id FROM archived_users;" => Rule::Unimplemented, "compound SELECT statements are not yet supported",
         select_result_subquery_unimplemented: "SELECT (SELECT 1);" => Rule::Unimplemented, "SELECT subqueries in result columns are not yet supported",

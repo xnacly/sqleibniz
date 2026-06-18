@@ -1677,13 +1677,7 @@ impl<'a> Parser<'a> {
 
         // SELECT [DISTINCT | ALL] <result-column>, ...
         self.consume_keyword(Keyword::SELECT);
-        if self.is_keyword(Keyword::DISTINCT) || self.is_keyword(Keyword::ALL) {
-            self.push_unimplemented_select_feature(
-                "SELECT DISTINCT/ALL is not yet supported",
-                "https://www.sqlite.org/lang_select.html#removal_of_duplicate_rows_distinct_processing",
-            );
-            return None;
-        }
+        let quantifier = self.select_quantifier();
         let columns = self.result_column_list()?;
 
         // FROM <schema-name.table-name|table-name>, ...
@@ -1696,16 +1690,18 @@ impl<'a> Parser<'a> {
         // WHERE <expr>
         let where_expr = self.optional_where_clause()?;
 
-        // GROUP BY <expr> [HAVING <expr>]
-        // TODO: parse GROUP BY/HAVING once aggregate semantics and expression-list stopping are
-        // modelled for SELECT.
-        if self.is_keyword(Keyword::GROUP) || self.is_keyword(Keyword::HAVING) {
-            self.push_unimplemented_select_feature(
-                "SELECT GROUP BY/HAVING is not yet supported",
-                "https://www.sqlite.org/lang_select.html#resultset",
-            );
-            return None;
-        }
+        // GROUP BY <expr>, ... [HAVING <expr>]
+        let group_by = if self.consume_if_keyword(Keyword::GROUP) {
+            self.consume_keyword(Keyword::BY);
+            self.group_by_clause()?
+        } else {
+            vec![]
+        };
+        let having = if self.consume_if_keyword(Keyword::HAVING) {
+            Some(self.expr()?)
+        } else {
+            None
+        };
 
         // WINDOW <window-name> AS <window-defn>, ...
         // TODO: parse window clauses after OVER/window function expressions exist.
@@ -1740,41 +1736,53 @@ impl<'a> Parser<'a> {
 
         some_box!(nodes::Select {
             location,
+            quantifier,
             columns,
             from,
             where_expr,
+            group_by,
+            having,
             order_by,
             limit,
         })
     }
 
+    /// https://www.sqlite.org/lang_select.html#removal_of_duplicate_rows_distinct_processing
+    #[cfg_attr(feature = "trace", trace)]
+    fn select_quantifier(&mut self) -> Option<nodes::SelectQuantifier> {
+        // DISTINCT | ALL
+        match self.cur().ttype {
+            Type::Keyword(Keyword::DISTINCT) => {
+                self.advance();
+                Some(nodes::SelectQuantifier::Distinct)
+            }
+            Type::Keyword(Keyword::ALL) => {
+                self.advance();
+                Some(nodes::SelectQuantifier::All)
+            }
+            _ => None,
+        }
+    }
+
     /// https://www.sqlite.org/syntax/table-or-subquery.html
     #[cfg_attr(feature = "trace", trace)]
-    fn simple_from_clause(&mut self) -> Option<Vec<nodes::SchemaTableContainer>> {
-        let mut tables = vec![];
+    fn simple_from_clause(&mut self) -> Option<Vec<nodes::SelectSource>> {
+        let mut sources = vec![];
         loop {
-            // <schema-name.table-name|table-name>
-            if self.is(Type::BraceLeft) && self.next_is(Type::Keyword(Keyword::SELECT)) {
-                // TODO: parse FROM subqueries after select-stmt can be embedded as table-or-subquery.
-                self.push_unimplemented_select_feature(
-                    "SELECT FROM subqueries are not yet supported",
-                    "https://www.sqlite.org/syntax/table-or-subquery.html",
-                );
-                return None;
-            }
-            tables.push(self.schema_table_container(Some("table"))?);
+            // <table-or-subquery> [join-clause]
+            sources.push(self.select_source()?);
 
-            // JOIN <table-or-subquery> ...
-            // TODO: parse joins once table-or-subquery is modelled beyond simple table names.
-            if self.is_keyword(Keyword::JOIN) {
-                self.push_unimplemented_select_feature(
-                    "SELECT JOIN clauses are not yet supported",
-                    "https://www.sqlite.org/syntax/join-clause.html",
-                );
-                return None;
+            if matches!(sources.last(), Some(nodes::SelectSource::Join { .. })) {
+                if self.starts_join_operator() {
+                    self.push_unimplemented_select_feature(
+                        "chained SELECT JOIN clauses are not yet supported",
+                        "https://www.sqlite.org/syntax/join-clause.html",
+                    );
+                    return None;
+                }
             }
 
-            // , <schema-name.table-name|table-name>
+            // , <table-or-subquery>
             if self.consume_if(Type::Comma) {
                 if self.is(Type::Semicolon)
                     || self.is_keyword(Keyword::WHERE)
@@ -1800,7 +1808,148 @@ impl<'a> Parser<'a> {
             break;
         }
 
-        Some(tables)
+        Some(sources)
+    }
+
+    /// https://www.sqlite.org/syntax/table-or-subquery.html and https://www.sqlite.org/syntax/join-clause.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn select_source(&mut self) -> Option<nodes::SelectSource> {
+        // <table-or-subquery>
+        let table = self.select_table()?;
+        let mut source = nodes::SelectSource::Table(table);
+
+        // <join-operator> <table-or-subquery> [ON <expr>]
+        if let Some(operator) = self.join_operator()? {
+            let right = self.select_table()?;
+            let on = if self.consume_if_keyword(Keyword::ON) {
+                Some(self.expr()?)
+            } else {
+                None
+            };
+            source = nodes::SelectSource::Join {
+                left: Box::new(source),
+                operator,
+                right,
+                on,
+            };
+        }
+
+        Some(source)
+    }
+
+    /// https://www.sqlite.org/syntax/table-or-subquery.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn select_table(&mut self) -> Option<nodes::SelectTable> {
+        // (<select-stmt>)
+        if self.is(Type::BraceLeft) && self.next_is(Type::Keyword(Keyword::SELECT)) {
+            // TODO: parse FROM subqueries after select-stmt can be embedded as table-or-subquery.
+            self.push_unimplemented_select_feature(
+                "SELECT FROM subqueries are not yet supported",
+                "https://www.sqlite.org/syntax/table-or-subquery.html",
+            );
+            return None;
+        }
+
+        // <schema-name.table-name|table-name>
+        let name = self.schema_table_container(Some("table"))?;
+
+        // [AS] alias
+        let alias = if self.consume_if_keyword(Keyword::AS) {
+            Some(self.consume_ident(
+                "https://www.sqlite.org/syntax/table-or-subquery.html",
+                "table_alias",
+            )?)
+        } else if matches!(self.cur().ttype, Type::Ident(_)) {
+            Some(self.consume_ident(
+                "https://www.sqlite.org/syntax/table-or-subquery.html",
+                "table_alias",
+            )?)
+        } else {
+            None
+        };
+
+        Some(nodes::SelectTable { name, alias })
+    }
+
+    /// https://www.sqlite.org/syntax/join-operator.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn join_operator(&mut self) -> Option<Option<nodes::JoinOperator>> {
+        // JOIN | INNER JOIN | LEFT [OUTER] JOIN | CROSS JOIN
+        let operator = if self.consume_if_keyword(Keyword::JOIN) {
+            nodes::JoinOperator::Inner
+        } else if self.consume_if_keyword(Keyword::INNER) {
+            self.consume_keyword(Keyword::JOIN);
+            nodes::JoinOperator::Inner
+        } else if self.consume_if_keyword(Keyword::LEFT) {
+            let is_outer = self.consume_if_keyword(Keyword::OUTER);
+            self.consume_keyword(Keyword::JOIN);
+            if is_outer {
+                nodes::JoinOperator::LeftOuter
+            } else {
+                nodes::JoinOperator::Left
+            }
+        } else if self.consume_if_keyword(Keyword::CROSS) {
+            self.consume_keyword(Keyword::JOIN);
+            nodes::JoinOperator::Cross
+        } else if self.is_keyword(Keyword::NATURAL)
+            || self.is_keyword(Keyword::RIGHT)
+            || self.is_keyword(Keyword::FULL)
+        {
+            self.push_unimplemented_select_feature(
+                "this SELECT JOIN operator is not yet supported",
+                "https://www.sqlite.org/syntax/join-operator.html",
+            );
+            return None;
+        } else {
+            return Some(None);
+        };
+
+        Some(Some(operator))
+    }
+
+    fn starts_join_operator(&mut self) -> bool {
+        self.is_keyword(Keyword::JOIN)
+            || self.is_keyword(Keyword::INNER)
+            || self.is_keyword(Keyword::LEFT)
+            || self.is_keyword(Keyword::CROSS)
+            || self.is_keyword(Keyword::NATURAL)
+            || self.is_keyword(Keyword::RIGHT)
+            || self.is_keyword(Keyword::FULL)
+    }
+
+    /// https://www.sqlite.org/lang_select.html#the_group_by_clause
+    #[cfg_attr(feature = "trace", trace)]
+    fn group_by_clause(&mut self) -> Option<Vec<nodes::Expr>> {
+        let mut expressions = vec![];
+        loop {
+            // <expr>
+            expressions.push(self.expr()?);
+
+            // , <expr>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon)
+                    || self.is_keyword(Keyword::HAVING)
+                    || self.is_keyword(Keyword::WINDOW)
+                    || self.is_keyword(Keyword::ORDER)
+                    || self.is_keyword(Keyword::LIMIT)
+                {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed SELECT statement",
+                        "SELECT GROUP BY expression list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_select.html#the_group_by_clause",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        Some(expressions)
     }
 
     /// https://www.sqlite.org/lang_select.html

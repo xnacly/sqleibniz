@@ -397,6 +397,37 @@ pub struct LimitOffset {
     pub offset: Option<Expr>,
 }
 
+#[derive(Debug, serde::Serialize)]
+pub enum SelectQuantifier {
+    All,
+    Distinct,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub enum JoinOperator {
+    Inner,
+    Left,
+    LeftOuter,
+    Cross,
+}
+
+#[derive(Debug)]
+pub struct SelectTable {
+    pub name: SchemaTableContainer,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum SelectSource {
+    Table(SelectTable),
+    Join {
+        left: Box<SelectSource>,
+        operator: JoinOperator,
+        right: SelectTable,
+        on: Option<Expr>,
+    },
+}
+
 node!(
     Select,
     r"SELECT statement, see: https://www.sqlite.org/lang_select.html
@@ -409,9 +440,12 @@ SELECT id, name FROM users WHERE active = true;
 SELECT users.* FROM users ORDER BY id LIMIT 10;
 ```
 ",
+    quantifier: Option<SelectQuantifier>,
     columns: Vec<ResultColumn>,
-    from: Vec<SchemaTableContainer>,
+    from: Vec<SelectSource>,
     where_expr: Option<Expr>,
+    group_by: Vec<Expr>,
+    having: Option<Expr>,
     order_by: Vec<OrderingTerm>,
     limit: Option<LimitOffset>
 );

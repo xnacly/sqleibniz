@@ -264,15 +264,10 @@ impl<'a> Lexer<'a> {
                 ']' => r.push(self.single(Type::BracketRight)),
                 // numbers, see: https://www.sqlite.org/lang_expr.html#literal_values_constants_
                 '0'..='9' | '.' => {
-                    // only '.', with no digit following it is an indexing operation
-                    // check if next char is not a valid member of an integer, floating point
-                    // number
-                    if self.is('.')
-                        && !(self.next_is('e') || self.next_is('E'))
-                        && !self
-                            .next()
-                            .is_some_and(|c| matches!(c, '_') || c.is_ascii_digit())
-                    {
+                    // A leading dot starts a numeric literal only when a digit follows it. In
+                    // qualified names like `schema.table`, the dot is a separator even when the
+                    // next identifier starts with an exponent-like character such as `email`.
+                    if self.is('.') && !self.next().is_some_and(|c| c.is_ascii_digit()) {
                         r.push(Token {
                             ttype: Type::Dot,
                             line: self.line,

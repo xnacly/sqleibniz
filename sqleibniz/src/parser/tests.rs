@@ -194,6 +194,8 @@ mod should_pass {
                     None,
                     None,
                     None,
+                    None,
+                    vec![],
                 )
             ),
         ],
@@ -206,6 +208,8 @@ mod should_pass {
                     None,
                     None,
                     None,
+                    None,
+                    vec![],
                 )
             ),
         ]
@@ -471,7 +475,7 @@ mod should_pass {
             vec![ColumnDef::new("name".into(), Some(SqliteStorageClass::Text), vec![])],
             vec![TableConstraint::Check(Expr::new(
                 Some(Token::new(Type::String("literal".into()))),
-                None, None, None, None,
+                None, None, None, None, None, vec![],
             ))],
             false,
             false,
@@ -486,7 +490,7 @@ mod should_pass {
             vec![ColumnDef::new("name".into(), Some(SqliteStorageClass::Text), vec![])],
             vec![TableConstraint::Check(Expr::new(
                 Some(Token::new(Type::String("literal".into()))),
-                None, None, None, None,
+                None, None, None, None, None, vec![],
             ))],
             false,
             false,
@@ -880,7 +884,91 @@ mod should_pass {
                 vec![ColumnConstraint::Check(
                     Expr::new(
                         Some(Token::new(Type::String("literal string lol".into()))),
-                        None, None, None, None
+                        None, None, None, None, None, vec![])
+                )],
+            )),
+            None,
+        )],
+
+        check_column_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (column_name);"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Check(
+                    Expr::new(
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some("column_name".into()),
+                        None,
+                        vec![],
+                    )
+                )],
+            )),
+            None,
+        )],
+
+        check_qualified_column_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (app.users.email);"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Check(
+                    Expr::new(
+                        None,
+                        None,
+                        Some("app".into()),
+                        Some("users".into()),
+                        Some("email".into()),
+                        None,
+                        vec![],
+                    )
+                )],
+            )),
+            None,
+        )],
+
+        check_function_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (length(trim(column_name)));"=
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+            None, None, None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Check(
+                    Expr::new(
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some("length".into()),
+                        vec![Expr::new(
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some("trim".into()),
+                            vec![Expr::new(
+                                None,
+                                None,
+                                None,
+                                None,
+                                Some("column_name".into()),
+                                None,
+                                vec![],
+                            )],
+                        )],
                     )
                 )],
             )),
@@ -917,8 +1005,7 @@ mod should_pass {
                 vec![ColumnConstraint::Default {
                     expr: Some(Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None
-                    )),
+                        None, None, None, None, None, vec![])),
                     literal: None,
                 }],
             )),
@@ -953,8 +1040,7 @@ mod should_pass {
                 vec![ColumnConstraint::Generated {
                     expr: Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None
-                    ),
+                        None, None, None, None, None, vec![]),
                     stored_virtual: Some(Keyword::STORED),
                 }],
             )),
@@ -972,8 +1058,7 @@ mod should_pass {
                 vec![ColumnConstraint::Generated {
                     expr: Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None
-                    ),
+                        None, None, None, None, None, vec![]),
                     stored_virtual: Some(Keyword::VIRTUAL),
                 }],
             )),
@@ -992,8 +1077,7 @@ mod should_pass {
                     stored_virtual: None,
                     expr: Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None
-                    )
+                        None, None, None, None, None, vec![])
                 }],
             )),
             None,
@@ -1091,7 +1175,7 @@ mod should_pass {
 
         // expr() bind parameter paths, reached through ATTACH <expr> AS <schema>
         bind_question_no_counter:r"ATTACH ? AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, None)), None, None, None))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, None)), None, None, None, None, vec![]))
         ],
         bind_question_with_counter:r"ATTACH ?5 AS db;"=vec![
             Attach::new("db".into(), Expr::new(
@@ -1100,17 +1184,17 @@ mod should_pass {
                     Some(Box::new(Literal::new(Token::new(Type::Number(5.0)))) as Box<dyn Node>),
                     None,
                 )),
-                None, None, None,
+                None, None, None, None, vec![],
             ))
         ],
         bind_colon:r"ATTACH :name AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, vec![]))
         ],
         bind_at:r"ATTACH @name AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, vec![]))
         ],
         bind_dollar:r"ATTACH $name AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, vec![]))
         ]
     }
 
@@ -1616,6 +1700,8 @@ mod should_fail {
 
         // expr invalid construct
         expr_invalid_construct: "ATTACH AS db;" => Rule::Syntax, "is not a valid construct",
+        expr_column_reference_too_deep: "ALTER TABLE schema.t ADD COLUMN c TEXT CHECK (a.b.c.d);" => Rule::Syntax, "at most schema.table.column",
+        expr_function_trailing_comma: "ALTER TABLE schema.t ADD COLUMN c TEXT CHECK (length(c,));" => Rule::Syntax, "trailing comma",
         bind_without_identifier: "ATTACH : AS db;" => Rule::Syntax, "requires an identifier as a postfix"
     }
 }

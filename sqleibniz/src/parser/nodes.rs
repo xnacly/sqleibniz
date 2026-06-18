@@ -166,7 +166,9 @@ node!(
     bind: Option<BindParameter>,
     schema: Option<String>,
     table: Option<String>,
-    column: Option<String>
+    column: Option<String>,
+    function: Option<String>,
+    arguments: Vec<Expr>
 );
 
 node!(

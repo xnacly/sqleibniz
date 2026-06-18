@@ -169,6 +169,15 @@ impl<'a> Parser<'a> {
         self.consume(Type::Keyword(keyword));
     }
 
+    fn consume_if(&mut self, t: Type) -> bool {
+        if self.is(t) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
     fn consume_if_keyword(&mut self, keyword: Keyword) -> bool {
         if self.is_keyword(keyword) {
             self.advance();
@@ -1850,6 +1859,8 @@ impl<'a> Parser<'a> {
             schema: None,
             table: None,
             column: None,
+            function: None,
+            arguments: vec![],
         };
         match self.cur().ttype {
             // literal value
@@ -1923,15 +1934,7 @@ impl<'a> Parser<'a> {
                 }
                 e.bind = Some(bind);
             }
-            Type::Ident(_) => {
-                // this is the start of a function
-                if self.next_is(Type::BraceLeft) {
-                    todo!("function-name(function-arguments) [filter-clause] [over-clause]")
-                }
-
-                // this sets either the schema, the table or the column
-                todo!("[schema-name.][table-name.]<column-name>");
-            }
+            Type::Ident(_) => return self.ident_expr(),
             _ => {
                 let cur = self.cur().clone();
                 self.push_err(
@@ -1948,6 +1951,116 @@ impl<'a> Parser<'a> {
             }
         }
         Some(e)
+    }
+
+    /// Parses an identifier-led expression.
+    ///
+    /// This covers the currently modelled subset of SQLite expressions:
+    ///
+    /// - `[schema-name.][table-name.]<column-name>`
+    /// - `function-name(function-arguments)`
+    ///
+    /// Binary operators, filters, and window clauses are intentionally left for a fuller expression
+    /// grammar. This function still consumes the identifier-led shape so constraints and defaults do
+    /// not panic on common column references and function calls.
+    ///
+    /// See: https://www.sqlite.org/lang_expr.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn ident_expr(&mut self) -> Option<nodes::Expr> {
+        let location = Location::from(self.cur());
+        let Type::Ident(first) = self.cur().ttype.clone() else {
+            return None;
+        };
+        self.advance();
+
+        // function-name(function-arguments)
+        if self.consume_if(Type::BraceLeft) {
+            return Some(nodes::Expr {
+                location,
+                literal: None,
+                bind: None,
+                schema: None,
+                table: None,
+                column: None,
+                function: Some(first),
+                arguments: self.expr_arguments()?,
+            });
+        }
+
+        let mut parts = vec![first];
+        while self.consume_if(Type::Dot) {
+            parts.push(self.consume_ident("https://www.sqlite.org/lang_expr.html", "column_name")?);
+        }
+
+        if parts.len() > 3 {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Malformed column reference",
+                "Expressions support at most schema.table.column references",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_expr.html",
+            );
+            return None;
+        }
+
+        let (schema, table, column) = match parts.as_slice() {
+            [column] => (None, None, Some(column.clone())),
+            [table, column] => (None, Some(table.clone()), Some(column.clone())),
+            [schema, table, column] => (
+                Some(schema.clone()),
+                Some(table.clone()),
+                Some(column.clone()),
+            ),
+            _ => unreachable!("parts always contains one to three identifiers"),
+        };
+
+        Some(nodes::Expr {
+            location,
+            literal: None,
+            bind: None,
+            schema,
+            table,
+            column,
+            function: None,
+            arguments: vec![],
+        })
+    }
+
+    /// Parses `function-arguments` inside an already consumed opening parenthesis.
+    ///
+    /// See: https://www.sqlite.org/syntax/function-arguments.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn expr_arguments(&mut self) -> Option<Vec<nodes::Expr>> {
+        let mut arguments = vec![];
+
+        if self.consume_if(Type::BraceRight) {
+            return Some(arguments);
+        }
+
+        loop {
+            arguments.push(self.expr()?);
+
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::BraceRight) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed function arguments",
+                        "function argument list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/function-arguments.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        self.consume(Type::BraceRight);
+        Some(arguments)
     }
 
     /// parses schema_name.table_name and table_name

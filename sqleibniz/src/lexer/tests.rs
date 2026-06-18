@@ -57,9 +57,14 @@ mod should_pass {
 
     test_group_pass_assert! {
         symbol,
-        // d is needed, because the lexer interprets . as a float start if the next character is
-        // not an identifier, if so, it detects Type::Dot
         dot: ".d"=vec![Type::Dot, Type::Ident(String::from("d"))],
+        qualified_name: "app.users.email"=vec![
+            Type::Ident(String::from("app")),
+            Type::Dot,
+            Type::Ident(String::from("users")),
+            Type::Dot,
+            Type::Ident(String::from("email")),
+        ],
         star: "*"=vec![Type::Asterisk],
         semicolon: ";"=vec![Type::Semicolon],
         comma: ","=vec![Type::Comma],
@@ -135,9 +140,9 @@ mod should_fail {
         // bad_float: ".",
         // was a test before, but due to lexer changes this just is Type::Dot*4
         // bad_float_multiple_dots: "....",
-        bad_float_with_e: ".e",
-        bad_float_with_large_e: ".E",
-        bad_float_multiple_e: ".eeee",
+        bad_float_with_e: "1e",
+        bad_float_with_large_e: "1E",
+        bad_float_multiple_e: "1eeee",
         bad_float_combination: "12.e+-15"
     }
 

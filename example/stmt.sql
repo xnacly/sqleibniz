@@ -90,3 +90,45 @@ ALTER TABLE schema.table_name ADD COLUMN new_column_name TEXT;
 
 ALTER TABLE schema.table_name DROP column_name;
 ALTER TABLE schema.table_name DROP COLUMN column_name;
+
+-- https://www.sqlite.org/lang_createtable.html
+CREATE TABLE users (id INTEGER, metadata ANY) STRICT;
+CREATE TEMP TABLE IF NOT EXISTS main.users (id INTEGER, name TEXT) STRICT;
+CREATE TABLE strict_users_without_rowid (id INTEGER PRIMARY KEY) STRICT, WITHOUT ROWID;
+CREATE TABLE memberships (
+    user_id INTEGER,
+    team_id INTEGER,
+    PRIMARY KEY (user_id, team_id) ON CONFLICT REPLACE
+) STRICT;
+CREATE TABLE emails (
+    email TEXT NOT NULL,
+    CONSTRAINT unique_email UNIQUE (email COLLATE nocase) ON CONFLICT IGNORE
+) STRICT;
+CREATE TABLE checked_users (
+    name TEXT,
+    CHECK ('literal')
+) STRICT;
+CREATE TABLE user_teams (
+    team_id INTEGER,
+    FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE
+) STRICT;
+
+-- https://www.sqlite.org/lang_createindex.html
+CREATE INDEX idx_users_id ON users (id);
+CREATE UNIQUE INDEX IF NOT EXISTS main.idx_users_email ON users (email);
+CREATE INDEX idx_users_name ON users (name COLLATE nocase DESC, id ASC);
+
+-- https://www.sqlite.org/lang_createtrigger.html
+CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN SELECT 1; END;
+CREATE TRIGGER user_i INSERT ON users BEGIN SELECT 1; END;
+CREATE TRIGGER user_au AFTER UPDATE ON users BEGIN UPDATE users SET name = new.name; END;
+CREATE TEMP TRIGGER IF NOT EXISTS temp.user_update INSTEAD OF UPDATE OF name, email ON users FOR EACH ROW WHEN old_name BEGIN UPDATE users SET name = new.name; END;
+CREATE TRIGGER user_ad BEFORE DELETE ON users BEGIN INSERT INTO audit VALUES (old.id); DELETE FROM sessions WHERE user_id = old.id; END;
+
+-- https://www.sqlite.org/pragma.html
+PRAGMA database_list;
+PRAGMA schema.cache_size = 5;
+PRAGMA schema.locking_mode = EXCLUSIVE;
+PRAGMA foreign_keys = true;
+PRAGMA schema.optimize(0xfffe);
+PRAGMA application_id;

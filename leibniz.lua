@@ -10,6 +10,7 @@ leibniz = {
 
         -- Uncomment sqlite diagnostics to ignore them.
         -- "sqlite/unsupported", -- Source file uses sql features sqlite does not support
+        -- "sqlite/unknown-pragma", -- Source file uses a PRAGMA not documented by SQLite
         -- "sqlite/quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
         -- "sql/unknown-keyword", -- an unknown keyword was encountered
         -- "sql/unterminated-string", -- a not closed string was found

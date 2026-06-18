@@ -4,7 +4,7 @@ Static analysis and LSP for SQL in Rust. Check for valid syntax, semantics and
 perform dynamic analysis.
 
 > [!WARNING]  
-> Sqleibniz is in early stages of development, please keep this in mind before
+> Sqleibniz is in development, please keep this in mind before
 > creating issues. Contributions are always welcome 💗
 
 ## Features
@@ -48,7 +48,7 @@ dynamic correctness. See below for a list of currently implemented features.
 
 | `sqlite` specification                                                     | syntax analysis | semantic analysis | Example                                                   |
 | -------------------------------------------------------------------------- | --------------- | ----------------- | --------------------------------------------------------- |
-| [`explain-stmt`](https://www.sqlite.org/lang_explain.html)                 | ✅              | ❌                | `EXPLAIN QUERY PLAN;`                                     |
+| [`explain-stmt`](https://www.sqlite.org/lang_explain.html)                 | ✅              | ❌                | `EXPLAIN QUERY PLAN VACUUM;`                              |
 | [`alter-table-stmt`](https://www.sqlite.org/lang_altertable.html)          | ✅              | ✅                | `ALTER TABLE schema.table_name ADD new_column_name TEXT;` |
 | [`analyze-stmt`](https://www.sqlite.org/lang_analyze.html)                 | ✅              | ❌                | `ANALYZE my_table;`                                       |
 | [`attach-stmt`](https://www.sqlite.org/lang_attach.html)                   | ✅              | ❌                | `ATTACH DATABASE 'users.db' AS users;`                    |
@@ -60,20 +60,23 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ❌              | ❌                |                                                           |
 | [`create-virtual-table-stmt`](https://www.sqlite.org/lang_createvtab.html) | ❌              | ❌                |                                                           |
 | [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ❌              | ❌                |                                                           |
-| [`detach-stmt`](https://www.sqlite.org/lang_detach.html)                   | ✅              | ❌                | `DETACH DATABASE my_database`                             |
+| [`detach-stmt`](https://www.sqlite.org/lang_detach.html)                   | ✅              | ❌                | `DETACH DATABASE my_database;`                            |
 | [`drop-index-stmt`](https://www.sqlite.org/lang_dropindex.html)            | ✅              | ❌                | `DROP INDEX my_index;`                                    |
 | [`drop-table-stmt`](https://www.sqlite.org/lang_droptable.html)            | ✅              | ❌                | `DROP TABLE my_table;`                                    |
 | [`drop-trigger-stmt`](https://www.sqlite.org/lang_droptrigger.html)        | ✅              | ❌                | `DROP TRIGGER my_trigger;`                                |
 | [`drop-view-stmt`](https://www.sqlite.org/lang_dropview.html)              | ✅              | ❌                | `DROP VIEW my_view;`                                      |
 | [`insert-stmt`](https://www.sqlite.org/lang_insert.html)                   | ❌              | ❌                |                                                           |
 | [`pragma-stmt`](https://www.sqlite.org/pragma.html)                        | ✅              | ✅                | `PRAGMA schema.optimize(0xfffe);`                         |
-| [`reindex-stmt`](https://www.sqlite.org/lang_reindex.html)                 | ✅              | ❌                | `REINDEX my_schema.my_table`                              |
-| [`release-stmt`](https://www.sqlite.org/lang_savepoint.html)               | ✅              | ❌                | `RELEASE SAVEPOINT latest_savepoint`                      |
+| [`reindex-stmt`](https://www.sqlite.org/lang_reindex.html)                 | ✅              | ❌                | `REINDEX my_schema.my_table;`                             |
+| [`release-stmt`](https://www.sqlite.org/lang_savepoint.html)               | ✅              | ❌                | `RELEASE SAVEPOINT latest_savepoint;`                     |
 | [`rollback-stmt`](https://www.sqlite.org/lang_transaction.html)            | ✅              | ❌                | `ROLLBACK TO latest_savepoint;`                           |
-| [`savepoint-stmt`](https://www.sqlite.org/lang_savepoint.html)             | ✅              | ❌                | `SAVEPOINT latest_savepoint`                              |
+| [`savepoint-stmt`](https://www.sqlite.org/lang_savepoint.html)             | ✅              | ❌                | `SAVEPOINT latest_savepoint;`                             |
 | [`select-stmt`](https://www.sqlite.org/lang_select.html)                   | ❌              | ❌                |                                                           |
 | [`update-stmt`](https://www.sqlite.org/lang_update.html)                   | ❌              | ❌                |                                                           |
-| [`vacuum-stmt`](https://www.sqlite.org/lang_vacuum.html)                   | ✅              | ❌                | `VACUUM INTO 'repacked.db'`                               |
+| [`vacuum-stmt`](https://www.sqlite.org/lang_vacuum.html)                   | ✅              | ❌                | `VACUUM INTO 'repacked.db';`                              |
+
+See [example/stmt.sql](./example/stmt.sql) for the executable statement support
+matrix used by the examples.
 
 ## Installation
 
@@ -108,132 +111,26 @@ make uninstall
 
 ## Command line interface usage
 
-```text
-Static analysis and LSP for SQL in Rust
-
-Usage: sqleibniz [OPTIONS] [PATHS]...
-
-Arguments:
-  [PATHS]...
-          files to analyse
-
-Options:
-  -i, --ignore-config
-          instruct sqleibniz to ignore the configuration, if specified
-
-  -c, --config <CONFIG>
-          path to the configuration
-          
-          [default: leibniz.lua]
-
-  -s, --silent
-          disable stdout/stderr output
-
-  -k, --kiss
-          keep it simple, stupid :^): make all stdoutput small and summarizing
-
-  -D <DISABLE>
-          disable diagnostics by their rules, all are enabled by default - this may change in the future
-
-          Possible values:
-          - file/no-content:             Source file is empty
-          - file/no-statements:          Source file is not empty but holds no statements
-          - sqleibniz/unimplemented:     Source file contains constructs sqleibniz does not yet understand
-          - sql/unknown-keyword:         Source file contains an unknown keyword
-          - sqleibniz/bad-instruction:   Source file contains invalid sqleibniz instruction
-          - sqleibniz/hook:              User-defined Lua hook reported a diagnostic
-          - sqlite/unsupported:         Source file uses sql features sqlite does not support
-          - sqlite/unknown-pragma:      Source file uses a PRAGMA not documented by SQLite
-          - sqlite/quirk:                Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates from a stricter, conventional SQL model
-          - sql/unterminated-string:     Source file contains an unterminated string
-          - sql/unknown-character:       The source file contains an unknown character
-          - sql/invalid-numeric-literal: The source file contains an invalid numeric literal, either overflow or incorrect syntax
-          - sql/invalid-blob:            The source file contains an invalid blob literal, either bad hex data (a-f,A-F,0-9) or incorrect syntax
-          - sql/syntax:                  The source file contains a structure with incorrect syntax
-          - sql/missing-semicolon:       The source file is missing a semicolon
-
-      --ast-json
-          dump the abstract syntax tree as pretty printed json
-
-      --ast
-          dump the abstract syntax tree as rusts pretty printed debugging
-
-      --sarif
-          emit SARIF 2.1.0 JSON to stdout
-
-      --lsp
-          invoke sqleibniz as a language server
-
-      --lsp-enable-hooks
-          execute configured Lua hooks in language server diagnostics
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-  -V, --version
-          Print version
+```shell
+sqleibniz [OPTIONS] [PATHS]...
 ```
+
+Run `sqleibniz --help` for the current CLI reference, including all flags and
+diagnostic rules accepted by `-D`.
 
 ### Configuration
 
-Sqleibniz can be configured via a `leibniz.lua` file. The file has to be
-available at the path sqleibniz is invoked from.
+Sqleibniz can be configured via a `leibniz.lua` file. By default, the CLI reads
+`./leibniz.lua`; pass `--config <path>` to use another file or `--ignore-config`
+to skip configuration entirely.
 
 The language server reads `disabled_rules` from the workspace `leibniz.lua`.
 Lua hooks are only executed in LSP diagnostics when `--lsp-enable-hooks` is
 passed explicitly.
 
-````lua
--- Example sqleibniz configuration.
-leibniz = {
-    disabled_rules = {
-        -- Ignore project-level diagnostics by default.
-        "file/no-content",            -- source file is empty
-        "file/no-statements",         -- source file contains no statements
-        "sqleibniz/unimplemented",    -- construct is not implemented yet
-        "sqleibniz/bad-instruction",  -- source file contains a bad sqleibniz instruction
-        "sqleibniz/hook",             -- a user-defined Lua hook reported a diagnostic
-
-        -- Uncomment sqlite diagnostics to ignore them.
-        -- "sqlite/unsupported", -- Source file uses sql features sqlite does not support
-        -- "sqlite/unknown-pragma", -- Source file uses a PRAGMA not documented by SQLite
-        -- "sqlite/quirk", -- Sqlite or SQL quirk: https://www.sqlite.org/quirks.html
-        -- "sql/unknown-keyword", -- an unknown keyword was encountered
-        -- "sql/unterminated-string", -- a not closed string was found
-        -- "sql/unknown-character", -- an unknown character was found
-        -- "sql/invalid-numeric-literal", -- an invalid numeric literal was found
-        -- "sql/invalid-blob", -- an invalid blob literal was found (either bad hex data or incorrect syntax)
-        -- "sql/syntax", -- a structure with incorrect syntax was found
-        -- "sql/missing-semicolon", -- a semicolon is missing
-    },
-
-    -- Custom diagnostics written in Lua.
-    hooks = {
-        {
-            name = "idents should be lowercase",
-            match = { node = "Token", kind = "Ident" },
-            hook = function(node)
-                if string.match(node.content, "%u") then
-                    sqleibniz.diagnostic(node, "All idents should be lowercase")
-                end
-            end
-        },
-        {
-            name = "idents shouldn't be longer than 12 characters",
-            match = { node = "Token", kind = "Ident" },
-            hook = function(node)
-                local max_size = 12
-                if string.len(node.content) >= max_size then
-                    sqleibniz.diagnostic(
-                        node,
-                        "idents shouldn't be longer than " .. max_size .. " characters"
-                    )
-                end
-            end
-        }
-    }
-}
-````
+See [leibniz.lua](./leibniz.lua) for the canonical example configuration,
+including disabled rules and Lua hook examples. That file includes the current
+SQLite-specific rules such as `sqlite/unknown-pragma`.
 
 Each hook runs for contexts matching every field in `match`. Token hooks can
 use `node.content` for the token text and report a diagnostic by calling
@@ -241,13 +138,13 @@ use `node.content` for the token text and report a diagnostic by calling
 
 ### sqleibniz instructions
 
-A sqleibniz instrution is prefixed with `@sqleibniz::` and written inside of a
+A sqleibniz instruction is prefixed with `@sqleibniz::` and written inside of a
 sql single line comment.
 
 #### `expect`
 
 In a similar fashion to ignoring diagnostics via the configuration in
-`leibniz.toml`, sqleibniz allows the user to expect diagnostics in the source
+`leibniz.lua`, sqleibniz allows the user to expect diagnostics in the source
 file and omit them on a statement by statement basis. To do so, a comment
 containing a sqleibniz instruction has to be issued:
 
@@ -270,18 +167,12 @@ EXPLAIN QUERY PLAN 25;
 Passing the above file to `sqleibniz`:
 
 ```text
-warn: Ignoring the following diagnostics, as specified:
- -> file/no-content
- -> file/no-statements
- -> sqleibniz/unimplemented
- -> sqleibniz/bad-instruction
- -> sqleibniz/hook
 ======================== example/sqleibniz.sql =========================
-error[sql/syntax]: Unexpected Literal
- -> /home/teo/programming/sqleibniz/example/sqleibniz.sql:13:20
- 11 | -- will cause a diagnostic
- 12 | -- incorrect, because EXPLAIN wants a sql stmt, not a literal
- 13 | EXPLAIN QUERY PLAN 25;
+sql/syntax: Unexpected Literal
+ -> /home/teo/programming/sqleibniz/example/sqleibniz.sql:11:20
+ 09 |
+ 10 | -- will not cause a diagnostic
+ 11 | EXPLAIN QUERY PLAN 25;
     |                    ~~ error occurs here.
     |
     ~ note: Literal Number(25.0) can not start a statement
@@ -289,15 +180,11 @@ error[sql/syntax]: Unexpected Literal
  * sql/syntax: The source file contains a structure with incorrect syntax
 =============================== Summary ================================
 [-] example/sqleibniz.sql:
-    1 Error(s) detected
-    0 Error(s) ignored
+    1 Diagnostic(s) detected
+    0 Diagnostic(s) ignored
 
 => 0/1 Files verified successfully, 1 verification failed.
 ```
-
-Or syntax highlighted via [`highlight::highlight`](https://github.com/xNaCly/sqleibniz/blob/master/src/highlight/mod.rs#L50) for the terminal:
-
-![rendered by the terminal](https://github.com/user-attachments/assets/dd349d59-1107-4421-82e4-f95549b43e85)
 
 `@sqleibniz::expect` is implemented by inserting a token with the type
 `Type::InstructionExpect`. The parser encounters this token and consumes all
@@ -352,11 +239,16 @@ EXPLAIN VACUUM;
 EXPLAIN QUERY PLAN VACUUM my_big_schema INTO 'repacked.db';
 ```
 
-For instance, parsing the above SQL results in the generation and printing of a
-parser callstack and the resulting AST:
+For instance, run the checked-in trace example:
 
 ```text
-sqleibniz master M :: cargo run --features trace -- -i test.sql
+cargo run --features trace -- -i example/trace_example.sql
+```
+
+That prints the parser callstack and resulting AST before the normal diagnostic
+summary:
+
+```text
 ============================== CALLSTACK ===============================
 ↳ parse | Keyword(EXPLAIN)
  ↳ sql_stmt_list | Keyword(EXPLAIN)
@@ -367,14 +259,13 @@ sqleibniz master M :: cargo run --features trace -- -i test.sql
     ↳ sql_stmt | Keyword(VACUUM)
      ↳ vacuum_stmt | Keyword(VACUUM)
 ================================= AST ==================================
-- Explain(Keyword(EXPLAIN)) [child=Vacuum { t: Token { ttype: Keyword(VACUUM), start: 8, end: 14, line: 0 }, schema_name: None, filename: None }]
-- Explain(Keyword(EXPLAIN)) [child=Vacuum { t: Token { ttype: Keyword(VACUUM), start: 19, end: 25, line: 1 }, schema_name: Some(Token { ttype: Ident("my_big_schema"), start: 26, end: 39, li
-ne: 1 }), filename: Some(Token { ttype: String("repacked.db"), start: 45, end: 58, line: 1 }) }]
-took: [120.166µs]
+- Explain(...) [child=Vacuum { ... }]
+- Explain(...) [child=Vacuum { ... }]
+took: [...]
 =============================== Summary ================================
-[+] test.sql:
-    0 Error(s) detected
-    0 Error(s) ignored
+[+] example/trace_example.sql:
+    0 Diagnostic(s) detected
+    0 Diagnostic(s) ignored
 
 => 1/1 Files verified successfully, 0 verification failed.
 ```

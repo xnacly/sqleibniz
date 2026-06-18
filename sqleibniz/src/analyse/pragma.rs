@@ -24,8 +24,18 @@ pub fn pragma(file: &str, pragma: &Pragma) -> Vec<Error> {
 struct PragmaEntry {
     name: &'static str,
     doc_url: &'static str,
+    /// Documented invocation forms for a known SQLite PRAGMA.
+    ///
+    /// These forms describe the public syntax from https://www.sqlite.org/pragma.html, not the
+    /// generic parser grammar. Unknown or extension pragmas are intentionally not validated.
     forms: PragmaForms,
+    /// Value contract for assignment/call forms.
+    ///
+    /// This is intentionally token-level validation. It checks documented value categories and
+    /// option sets, but it does not try to prove runtime constraints such as page-size ranges,
+    /// build-option availability, or database-state-dependent behaviour.
     value: PragmaValue,
+    /// Optional semantic diagnostics after the documented form/value check has passed.
     analysis: PragmaAnalysis,
 }
 
@@ -75,15 +85,26 @@ impl PragmaForms {
 
 #[derive(Clone, Copy)]
 enum PragmaValue {
+    /// Query-only pragmas. Assignment/call forms using this value spec should be rejected by
+    /// `PragmaForms` before value validation runs.
     None,
+    /// SQLite boolean values: `0`, `1`, `on`, `off`, `yes`, `no`, `true`, `false`.
     Boolean,
+    /// Numeric literals with no fractional component.
     Integer,
+    /// Table/index/schema-like names represented by identifiers, strings, or SQLite keywords.
     Name,
+    /// Text-like values represented by string literals or identifiers.
     Text,
+    /// Boolean values or integer numeric literals.
     BooleanOrInteger,
+    /// Boolean values or one of a fixed set of documented named options.
     BooleanOrNamed(&'static [&'static str]),
+    /// Integer numeric literals or one of a fixed set of documented named options.
     IntegerOrNamed(&'static [&'static str]),
+    /// Integer numeric literals or table/index/schema-like names.
     IntegerOrName,
+    /// One of a fixed set of documented named options.
     Named(&'static [&'static str]),
 }
 
@@ -120,11 +141,14 @@ impl PragmaValue {
 }
 
 enum PragmaAnalysis {
+    /// No semantic lint beyond documented form/value validation.
     None,
+    /// Unconditional warning for PRAGMAs SQLite documents as deprecated.
     Deprecated {
         msg: &'static str,
         note: &'static str,
     },
+    /// Value-sensitive semantic diagnostic, such as warning only when a setting is enabled.
     Check {
         diagnostic: fn(&str, &'static str, &Pragma) -> Option<Error>,
         #[cfg(test)]
@@ -200,23 +224,43 @@ impl PragmaEntry {
 }
 
 macro_rules! forms {
+    // `PRAGMA name;`
     (query) => {
         PragmaForms::new(true, false, false)
     };
+    // `PRAGMA name(value);`
     (call) => {
         PragmaForms::new(false, false, true)
     };
+    // `PRAGMA name;` and `PRAGMA name = value;`
     (query, assign) => {
         PragmaForms::new(true, true, false)
     };
+    // `PRAGMA name;` and `PRAGMA name(value);`
     (query, call) => {
         PragmaForms::new(true, false, true)
     };
+    // `PRAGMA name;`, `PRAGMA name = value;` and `PRAGMA name(value);`
     (query, assign, call) => {
         PragmaForms::new(true, true, true)
     };
 }
 
+/// Defines one known SQLite PRAGMA validation spec.
+///
+/// The first argument is the canonical SQLite PRAGMA name without an optional schema prefix. The
+/// macro derives the docs URL as `https://www.sqlite.org/pragma.html#pragma_<name>`.
+///
+/// The second argument is the documented invocation shape, expressed with `forms!`:
+///
+/// - `forms!(query)` accepts `PRAGMA name;`
+/// - `forms!(query, assign)` accepts `PRAGMA name;` and `PRAGMA name = value;`
+/// - `forms!(query, call)` accepts `PRAGMA name;` and `PRAGMA name(value);`
+/// - `forms!(call)` accepts only `PRAGMA name(value);`
+///
+/// The third argument is the `PragmaValue` contract for assignment/call values. It is ignored for
+/// query invocations. Additional `deprecated(...)` and `check(...)` clauses add semantic diagnostics
+/// after form/value validation passes.
 macro_rules! pragma_entry {
     ($name:literal, $forms:expr, $value:expr) => {
         PragmaEntry {

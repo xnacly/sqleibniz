@@ -56,6 +56,12 @@ mod should_pass {
     }
 
     test_group_pass_assert! {
+        comment,
+        block_comment_with_following: "/**/ SELECT"=vec![Type::Keyword(crate::types::Keyword::SELECT)],
+        multiline_block_comment_with_following: "/*\n\n\n*/ SELECT"=vec![Type::Keyword(crate::types::Keyword::SELECT)]
+    }
+
+    test_group_pass_assert! {
         symbol,
         dot: ".d"=vec![Type::Dot, Type::Ident(String::from("d"))],
         qualified_name: "app.users.email"=vec![
@@ -65,11 +71,29 @@ mod should_pass {
             Type::Dot,
             Type::Ident(String::from("email")),
         ],
+        plus: "+"=vec![Type::Plus],
+        minus: "-"=vec![Type::Minus],
         star: "*"=vec![Type::Asterisk],
+        slash: "/"=vec![Type::Slash],
         semicolon: ";"=vec![Type::Semicolon],
         comma: ","=vec![Type::Comma],
         percent: "%"=vec![Type::Percent],
         equal: "="=vec![Type::Equal],
+        equal_equal: "=="=vec![Type::EqualEqual],
+        less: "<"=vec![Type::Less],
+        less_equal: "<="=vec![Type::LessEqual],
+        greater: ">"=vec![Type::Greater],
+        greater_equal: ">="=vec![Type::GreaterEqual],
+        bang_not_equal: "!="=vec![Type::NotEqual],
+        angle_not_equal: "<>"=vec![Type::NotEqual],
+        concat: "||"=vec![Type::PipePipe],
+        bit_and: "&"=vec![Type::Ampersand],
+        bit_or: "|"=vec![Type::Pipe],
+        bit_not: "~"=vec![Type::Tilde],
+        shift_left: "<<"=vec![Type::ShiftLeft],
+        shift_right: ">>"=vec![Type::ShiftRight],
+        arrow: "->"=vec![Type::Arrow],
+        arrow_arrow: "->>"=vec![Type::ArrowArrow],
         at: "@"=vec![Type::At],
         colon: ":"=vec![Type::Colon],
         dollar: "$"=vec![Type::Dollar],

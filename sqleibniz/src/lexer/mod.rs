@@ -95,6 +95,15 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn double(&self, ttype: Type) -> Token {
+        Token {
+            ttype,
+            start: self.line_pos,
+            end: self.line_pos + 1,
+            line: self.line,
+        }
+    }
+
     /// progresses in the input until ',\n or EOF are hit.
     fn string(&mut self) -> Result<Token, Box<error::Error>> {
         let start = self.pos;
@@ -164,28 +173,49 @@ impl<'a> Lexer<'a> {
                 // comments, see: https://www.sqlite.org/lang_comment.html
                 '/' => {
                     if self.next_is('*') {
+                        self.advance();
+                        self.advance();
                         while !self.is_eof() {
-                            self.advance();
                             if self.is('*') && self.next_is('/') {
+                                self.advance();
+                                self.advance();
                                 break;
                             }
+                            self.advance();
                         }
+                        continue;
+                    } else {
+                        r.push(self.single(Type::Slash));
                     }
                 }
                 // comments, see: https://www.sqlite.org/lang_comment.html
                 '-' => {
-                    // skip --
-                    self.advance();
-                    if !self.is('-') {
-                        self.errors.push(self.err(
-                            "'-' is not a valid symbol at this point",
-                            "If you meant a comment, those are prefixed with '--'",
-                            self.line_pos,
-                            Rule::Syntax,
-                        ));
-                        break;
+                    if self.next_is('>') {
+                        if self.source.get(self.pos + 2).is_some_and(|cc| *cc == b'>') {
+                            r.push(Token {
+                                ttype: Type::ArrowArrow,
+                                start: self.line_pos,
+                                end: self.line_pos + 2,
+                                line: self.line,
+                            });
+                            self.advance();
+                            self.advance();
+                        } else {
+                            r.push(self.double(Type::Arrow));
+                            self.advance();
+                        }
+                        self.advance();
+                        continue;
                     }
 
+                    if !self.next_is('-') {
+                        r.push(self.single(Type::Minus));
+                        self.advance();
+                        continue;
+                    }
+
+                    // skip --
+                    self.advance();
                     self.advance();
 
                     while !self.is_eof() {
@@ -249,11 +279,69 @@ impl<'a> Lexer<'a> {
                     Ok(str_tok) => r.push(str_tok),
                     Err(err) => self.errors.push(*err),
                 },
+                '+' => r.push(self.single(Type::Plus)),
                 '*' => r.push(self.single(Type::Asterisk)),
                 ';' => r.push(self.single(Type::Semicolon)),
                 ',' => r.push(self.single(Type::Comma)),
                 '%' => r.push(self.single(Type::Percent)),
-                '=' => r.push(self.single(Type::Equal)),
+                '=' => {
+                    if self.next_is('=') {
+                        r.push(self.double(Type::EqualEqual));
+                        self.advance();
+                    } else {
+                        r.push(self.single(Type::Equal));
+                    }
+                }
+                '<' => {
+                    if self.next_is('=') {
+                        r.push(self.double(Type::LessEqual));
+                        self.advance();
+                    } else if self.next_is('>') {
+                        r.push(self.double(Type::NotEqual));
+                        self.advance();
+                    } else if self.next_is('<') {
+                        r.push(self.double(Type::ShiftLeft));
+                        self.advance();
+                    } else {
+                        r.push(self.single(Type::Less));
+                    }
+                }
+                '>' => {
+                    if self.next_is('=') {
+                        r.push(self.double(Type::GreaterEqual));
+                        self.advance();
+                    } else if self.next_is('>') {
+                        r.push(self.double(Type::ShiftRight));
+                        self.advance();
+                    } else {
+                        r.push(self.single(Type::Greater));
+                    }
+                }
+                '!' => {
+                    if self.next_is('=') {
+                        r.push(self.double(Type::NotEqual));
+                        self.advance();
+                    } else {
+                        let mut err = self.err(
+                            "Unknown character '!'",
+                            "use != for not-equal comparisons",
+                            self.line_pos,
+                            Rule::UnknownCharacter,
+                        );
+                        err.doc_url = Some("https://www.sqlite.org/lang_expr.html");
+                        self.errors.push(err);
+                    }
+                }
+                '|' => {
+                    if self.next_is('|') {
+                        r.push(self.double(Type::PipePipe));
+                        self.advance();
+                    } else {
+                        r.push(self.single(Type::Pipe));
+                    }
+                }
+                '&' => r.push(self.single(Type::Ampersand)),
+                '~' => r.push(self.single(Type::Tilde)),
                 '@' => r.push(self.single(Type::At)),
                 ':' => r.push(self.single(Type::Colon)),
                 '$' => r.push(self.single(Type::Dollar)),

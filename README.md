@@ -66,7 +66,7 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`drop-trigger-stmt`](https://www.sqlite.org/lang_droptrigger.html)        | ✅              | ❌                | `DROP TRIGGER my_trigger;`                                |
 | [`drop-view-stmt`](https://www.sqlite.org/lang_dropview.html)              | ✅              | ❌                | `DROP VIEW my_view;`                                      |
 | [`insert-stmt`](https://www.sqlite.org/lang_insert.html)                   | ❌              | ❌                |                                                           |
-| [`pragma-stmt`](https://www.sqlite.org/pragma.html)                        | ✅              | ❌                | `PRAGMA schema.optimize(0xfffe);`                         |
+| [`pragma-stmt`](https://www.sqlite.org/pragma.html)                        | ✅              | ✅                | `PRAGMA schema.optimize(0xfffe);`                         |
 | [`reindex-stmt`](https://www.sqlite.org/lang_reindex.html)                 | ✅              | ❌                | `REINDEX my_schema.my_table`                              |
 | [`release-stmt`](https://www.sqlite.org/lang_savepoint.html)               | ✅              | ❌                | `RELEASE SAVEPOINT latest_savepoint`                      |
 | [`rollback-stmt`](https://www.sqlite.org/lang_transaction.html)            | ✅              | ❌                | `ROLLBACK TO latest_savepoint;`                           |

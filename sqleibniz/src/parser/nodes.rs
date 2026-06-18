@@ -168,6 +168,7 @@ node!(
     table: Option<String>,
     column: Option<String>,
     function: Option<String>,
+    operator: Option<String>,
     arguments: Vec<Expr>
 );
 

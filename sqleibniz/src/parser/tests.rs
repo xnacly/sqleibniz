@@ -3,6 +3,8 @@ macro_rules! test_group_pass_assert {
     ($group_name:ident,$($ident:ident:$input:literal=$expected:expr),*) => {
     mod $group_name {
         #[allow(unused_imports)]
+        use super::*;
+        #[allow(unused_imports)]
         use crate::{lexer, parser::Parser, parser::nodes::*, types::*, types::storage::*};
 
         $(
@@ -37,6 +39,75 @@ macro_rules! test_group_pass_assert {
 
 #[cfg(test)]
 mod should_pass {
+    use crate::{
+        parser::nodes::{Alter, ColumnConstraint, ColumnDef, Expr, SchemaTableContainer},
+        types::{Token, Type, storage::SqliteStorageClass},
+    };
+
+    fn alter_check(expr: Expr) -> Vec<Alter> {
+        vec![Alter::new(
+            SchemaTableContainer::SchemaAndTable {
+                schema: "schema".into(),
+                table: "table_name".into(),
+            },
+            None,
+            None,
+            None,
+            Some(ColumnDef::new(
+                "column_name".into(),
+                Some(SqliteStorageClass::Text),
+                vec![ColumnConstraint::Check(expr)],
+            )),
+            None,
+        )]
+    }
+
+    fn lit(ttype: Type) -> Expr {
+        Expr::new(
+            Some(Token::new(ttype)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec![],
+        )
+    }
+
+    fn num(value: f64) -> Expr {
+        lit(Type::Number(value))
+    }
+
+    fn string(value: &str) -> Expr {
+        lit(Type::String(value.into()))
+    }
+
+    fn col(name: &str) -> Expr {
+        Expr::new(
+            None,
+            None,
+            None,
+            None,
+            Some(name.into()),
+            None,
+            None,
+            vec![],
+        )
+    }
+
+    fn op(operator: &str, arguments: Vec<Expr>) -> Expr {
+        Expr::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(operator.into()),
+            arguments,
+        )
+    }
 
     test_group_pass_assert! {
         sqleibniz_instructions,
@@ -194,8 +265,7 @@ mod should_pass {
                     None,
                     None,
                     None,
-                    None,
-                    vec![],
+                    None, None, vec![],
                 )
             ),
         ],
@@ -208,8 +278,7 @@ mod should_pass {
                     None,
                     None,
                     None,
-                    None,
-                    vec![],
+                    None, None, vec![],
                 )
             ),
         ]
@@ -475,7 +544,7 @@ mod should_pass {
             vec![ColumnDef::new("name".into(), Some(SqliteStorageClass::Text), vec![])],
             vec![TableConstraint::Check(Expr::new(
                 Some(Token::new(Type::String("literal".into()))),
-                None, None, None, None, None, vec![],
+                None, None, None, None, None, None, vec![],
             ))],
             false,
             false,
@@ -490,7 +559,7 @@ mod should_pass {
             vec![ColumnDef::new("name".into(), Some(SqliteStorageClass::Text), vec![])],
             vec![TableConstraint::Check(Expr::new(
                 Some(Token::new(Type::String("literal".into()))),
-                None, None, None, None, None, vec![],
+                None, None, None, None, None, None, vec![],
             ))],
             false,
             false,
@@ -884,7 +953,7 @@ mod should_pass {
                 vec![ColumnConstraint::Check(
                     Expr::new(
                         Some(Token::new(Type::String("literal string lol".into()))),
-                        None, None, None, None, None, vec![])
+                        None, None, None, None, None, None, vec![])
                 )],
             )),
             None,
@@ -905,8 +974,7 @@ mod should_pass {
                         None,
                         None,
                         Some("column_name".into()),
-                        None,
-                        vec![],
+                        None, None, vec![],
                     )
                 )],
             )),
@@ -928,8 +996,7 @@ mod should_pass {
                         Some("app".into()),
                         Some("users".into()),
                         Some("email".into()),
-                        None,
-                        vec![],
+                        None, None, vec![],
                     )
                 )],
             )),
@@ -952,6 +1019,7 @@ mod should_pass {
                         None,
                         None,
                         Some("length".into()),
+                        None,
                         vec![Expr::new(
                             None,
                             None,
@@ -959,14 +1027,14 @@ mod should_pass {
                             None,
                             None,
                             Some("trim".into()),
+                            None,
                             vec![Expr::new(
                                 None,
                                 None,
                                 None,
                                 None,
                                 Some("column_name".into()),
-                                None,
-                                vec![],
+                                None, None, vec![],
                             )],
                         )],
                     )
@@ -1005,7 +1073,7 @@ mod should_pass {
                 vec![ColumnConstraint::Default {
                     expr: Some(Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None, None, vec![])),
+                        None, None, None, None, None, None, vec![])),
                     literal: None,
                 }],
             )),
@@ -1027,6 +1095,118 @@ mod should_pass {
     }
 
     test_group_pass_assert! {
+        expr_operators,
+
+        binary_comparison:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (age > 0);"=
+        alter_check(op(">", vec![col("age"), num(0.0)])),
+
+        logical_precedence:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (age > 0 AND age < 130 OR admin = true);"=
+        alter_check(op("OR", vec![
+            op("AND", vec![
+                op(">", vec![col("age"), num(0.0)]),
+                op("<", vec![col("age"), num(130.0)]),
+            ]),
+            op("=", vec![col("admin"), lit(Type::Boolean(true))]),
+        ])),
+
+        arithmetic_precedence:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (price + tax * 2 == total);"=
+        alter_check(op("==", vec![
+            op("+", vec![
+                col("price"),
+                op("*", vec![col("tax"), num(2.0)]),
+            ]),
+            col("total"),
+        ])),
+
+        unary_not_low_precedence:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (NOT age > 0);"=
+        alter_check(op("NOT", vec![op(">", vec![col("age"), num(0.0)])])),
+
+        unary_numeric_high_precedence:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (-age < 0);"=
+        alter_check(op("<", vec![op("-", vec![col("age")]), num(0.0)])),
+
+        bitwise_and_shift:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (~flags & 3 << 1);"=
+        alter_check(op("<<", vec![
+            op("&", vec![op("~", vec![col("flags")]), num(3.0)]),
+            num(1.0),
+        ])),
+
+        concat_and_json_extract:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (doc ->> 'name' || suffix);"=
+        alter_check(op("||", vec![
+            op("->>", vec![col("doc"), string("name")]),
+            col("suffix"),
+        ])),
+
+        is_not:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (deleted_at IS NOT NULL);"=
+        alter_check(op("IS NOT", vec![col("deleted_at"), lit(Type::Keyword(Keyword::NULL))])),
+
+        distinct_from:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (a IS DISTINCT FROM b);"=
+        alter_check(op("IS DISTINCT FROM", vec![col("a"), col("b")])),
+
+        not_distinct_from:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (a IS NOT DISTINCT FROM b);"=
+        alter_check(op("IS NOT DISTINCT FROM", vec![col("a"), col("b")])),
+
+        between:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (age BETWEEN 18 AND 130);"=
+        alter_check(op("BETWEEN", vec![col("age"), num(18.0), num(130.0)])),
+
+        not_between:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (age NOT BETWEEN 18 AND 130);"=
+        alter_check(op("NOT BETWEEN", vec![col("age"), num(18.0), num(130.0)])),
+
+        in_list:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (status IN ('new', 'done'));"=
+        alter_check(op("IN", vec![col("status"), string("new"), string("done")])),
+
+        not_in_empty_list:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (status NOT IN ());"=
+        alter_check(op("NOT IN", vec![col("status")])),
+
+        like_escape:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (name NOT LIKE 'a%' ESCAPE '\\');"=
+        alter_check(op("ESCAPE", vec![
+            op("NOT LIKE", vec![col("name"), string("a%")]),
+            string("\\\\"),
+        ])),
+
+        glob_match_regexp:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (name GLOB 'a*' AND body MATCH 'needle' AND email REGEXP '.+@.+');"=
+        alter_check(op("AND", vec![
+            op("AND", vec![
+                op("GLOB", vec![col("name"), string("a*")]),
+                op("MATCH", vec![col("body"), string("needle")]),
+            ]),
+            op("REGEXP", vec![col("email"), string(".+@.+")]),
+        ])),
+
+        collate_expr:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (name COLLATE nocase = 'x');"=
+        alter_check(op("=", vec![
+            op("COLLATE", vec![col("name"), col("nocase")]),
+            string("x"),
+        ])),
+
+        postfix_null_checks:
+        r"ALTER TABLE schema.table_name ADD COLUMN column_name TEXT CHECK (name NOTNULL OR alias NOT NULL OR deleted_at ISNULL);"=
+        alter_check(op("OR", vec![
+            op("OR", vec![
+                op("NOTNULL", vec![col("name")]),
+                op("NOT NULL", vec![col("alias")]),
+            ]),
+            op("ISNULL", vec![col("deleted_at")]),
+        ]))
+    }
+
+    test_group_pass_assert! {
         column_constraint_generated,
 
         generated_stored:
@@ -1040,7 +1220,7 @@ mod should_pass {
                 vec![ColumnConstraint::Generated {
                     expr: Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None, None, vec![]),
+                        None, None, None, None, None, None, vec![]),
                     stored_virtual: Some(Keyword::STORED),
                 }],
             )),
@@ -1058,7 +1238,7 @@ mod should_pass {
                 vec![ColumnConstraint::Generated {
                     expr: Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None, None, vec![]),
+                        None, None, None, None, None, None, vec![]),
                     stored_virtual: Some(Keyword::VIRTUAL),
                 }],
             )),
@@ -1077,7 +1257,7 @@ mod should_pass {
                     stored_virtual: None,
                     expr: Expr::new(
                         Some(Token::new(Type::String("literal".into()))),
-                        None, None, None, None, None, vec![])
+                        None, None, None, None, None, None, vec![])
                 }],
             )),
             None,
@@ -1175,7 +1355,7 @@ mod should_pass {
 
         // expr() bind parameter paths, reached through ATTACH <expr> AS <schema>
         bind_question_no_counter:r"ATTACH ? AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, None)), None, None, None, None, vec![]))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, None)), None, None, None, None, None, vec![]))
         ],
         bind_question_with_counter:r"ATTACH ?5 AS db;"=vec![
             Attach::new("db".into(), Expr::new(
@@ -1184,17 +1364,17 @@ mod should_pass {
                     Some(Box::new(Literal::new(Token::new(Type::Number(5.0)))) as Box<dyn Node>),
                     None,
                 )),
-                None, None, None, None, vec![],
+                None, None, None, None, None, vec![],
             ))
         ],
         bind_colon:r"ATTACH :name AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, vec![]))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, None, vec![]))
         ],
         bind_at:r"ATTACH @name AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, vec![]))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, None, vec![]))
         ],
         bind_dollar:r"ATTACH $name AS db;"=vec![
-            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, vec![]))
+            Attach::new("db".into(), Expr::new(None, Some(BindParameter::new(None, Some("name".into()))), None, None, None, None, None, vec![]))
         ]
     }
 

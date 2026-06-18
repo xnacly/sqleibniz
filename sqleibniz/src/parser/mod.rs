@@ -31,6 +31,83 @@ pub struct Parser<'a> {
     pub errors: Vec<Error>,
 }
 
+enum ExprOperator {
+    Postfix {
+        operator: String,
+        left_bp: u8,
+        advance: usize,
+    },
+    Infix {
+        operator: String,
+        left_bp: u8,
+        right_bp: u8,
+        advance: usize,
+    },
+    Between {
+        operator: String,
+        left_bp: u8,
+        right_bp: u8,
+        advance: usize,
+    },
+    InList {
+        operator: String,
+        left_bp: u8,
+        advance: usize,
+    },
+}
+
+impl ExprOperator {
+    fn postfix(operator: &str, left_bp: u8) -> Self {
+        Self::postfix_advanced(operator, left_bp, 1)
+    }
+
+    fn postfix_advanced(operator: &str, left_bp: u8, advance: usize) -> Self {
+        Self::Postfix {
+            operator: operator.into(),
+            left_bp,
+            advance,
+        }
+    }
+
+    fn infix(operator: &str, left_bp: u8, right_bp: u8) -> Self {
+        Self::infix_advanced(operator, left_bp, right_bp, 1)
+    }
+
+    fn infix_advanced(operator: &str, left_bp: u8, right_bp: u8, advance: usize) -> Self {
+        Self::Infix {
+            operator: operator.into(),
+            left_bp,
+            right_bp,
+            advance,
+        }
+    }
+
+    fn between(operator: &str, left_bp: u8, right_bp: u8, advance: usize) -> Self {
+        Self::Between {
+            operator: operator.into(),
+            left_bp,
+            right_bp,
+            advance,
+        }
+    }
+
+    fn in_list(operator: &str, left_bp: u8, advance: usize) -> Self {
+        Self::InList {
+            operator: operator.into(),
+            left_bp,
+            advance,
+        }
+    }
+}
+
+fn prefix_binding_power(operator: &str) -> u8 {
+    match operator {
+        "NOT" => 4,
+        "+" | "-" | "~" => 16,
+        _ => unreachable!("prefix operator is controlled by prefix_operator"),
+    }
+}
+
 /// wrap argument in Some(Box::new(_))
 macro_rules! some_box {
     ($expr:expr) => {
@@ -190,6 +267,12 @@ impl<'a> Parser<'a> {
     fn next_is(&self, t: Type) -> bool {
         self.tokens
             .get(self.pos + 1)
+            .is_some_and(|tok| tok.ttype == t)
+    }
+
+    fn nth_is(&self, offset: usize, t: Type) -> bool {
+        self.tokens
+            .get(self.pos + offset)
             .is_some_and(|tok| tok.ttype == t)
     }
 
@@ -1852,6 +1935,142 @@ impl<'a> Parser<'a> {
     /// parses an sql expression: https://www.sqlite.org/syntax/expr.html
     #[cfg_attr(feature = "trace", trace)]
     fn expr(&mut self) -> Option<nodes::Expr> {
+        self.expr_bp(0)
+    }
+
+    /// Pratt parser for the SQLite expression subset sqleibniz currently models.
+    ///
+    /// This handles primary expressions, unary operators, binary operators, grouped expressions,
+    /// and identifier-led column/function expressions. The surrounding parser decides where an
+    /// expression must stop by leaving `)`, `,`, and statement terminators out of the operator set.
+    ///
+    /// See: https://www.sqlite.org/lang_expr.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn expr_bp(&mut self, min_bp: u8) -> Option<nodes::Expr> {
+        let mut lhs = self.expr_prefix()?;
+
+        loop {
+            let Some(next) = self.expr_operator() else {
+                break;
+            };
+
+            let location = lhs.location;
+            match next {
+                ExprOperator::Postfix {
+                    operator,
+                    left_bp,
+                    advance,
+                } => {
+                    if left_bp < min_bp {
+                        break;
+                    }
+                    for _ in 0..advance {
+                        self.advance();
+                    }
+                    lhs = self.operator_expr(location, operator, vec![lhs]);
+                }
+                ExprOperator::Infix {
+                    operator,
+                    left_bp,
+                    right_bp,
+                    advance,
+                } => {
+                    if left_bp < min_bp {
+                        break;
+                    }
+                    for _ in 0..advance {
+                        self.advance();
+                    }
+                    let rhs = self.expr_bp(right_bp)?;
+                    lhs = self.operator_expr(location, operator, vec![lhs, rhs]);
+                }
+                ExprOperator::Between {
+                    operator,
+                    left_bp,
+                    right_bp,
+                    advance,
+                } => {
+                    if left_bp < min_bp {
+                        break;
+                    }
+                    for _ in 0..advance {
+                        self.advance();
+                    }
+                    let lower = self.expr_bp(right_bp)?;
+                    self.consume_keyword(Keyword::AND);
+                    let upper = self.expr_bp(right_bp)?;
+                    lhs = self.operator_expr(location, operator, vec![lhs, lower, upper]);
+                }
+                ExprOperator::InList {
+                    operator,
+                    left_bp,
+                    advance,
+                } => {
+                    if left_bp < min_bp {
+                        break;
+                    }
+                    for _ in 0..advance {
+                        self.advance();
+                    }
+                    self.consume(Type::BraceLeft);
+                    let mut arguments = vec![lhs];
+
+                    if self.consume_if(Type::BraceRight) {
+                        lhs = self.operator_expr(location, operator, arguments);
+                        continue;
+                    }
+
+                    loop {
+                        arguments.push(self.expr()?);
+
+                        if self.consume_if(Type::Comma) {
+                            if self.is(Type::BraceRight) {
+                                let src = Location::from(self.cur());
+                                self.push_doc_err(
+                                    "Malformed IN expression",
+                                    "IN expression value list has a trailing comma",
+                                    src,
+                                    Rule::Syntax,
+                                    "https://www.sqlite.org/lang_expr.html#the_in_and_not_in_operators",
+                                );
+                                break;
+                            }
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    self.consume(Type::BraceRight);
+                    lhs = self.operator_expr(location, operator, arguments);
+                }
+            }
+        }
+
+        Some(lhs)
+    }
+
+    fn operator_expr(
+        &self,
+        location: Location,
+        operator: String,
+        arguments: Vec<nodes::Expr>,
+    ) -> nodes::Expr {
+        nodes::Expr {
+            location,
+            literal: None,
+            bind: None,
+            schema: None,
+            table: None,
+            column: None,
+            function: None,
+            operator: Some(operator),
+            arguments,
+        }
+    }
+
+    #[cfg_attr(feature = "trace", trace)]
+    fn expr_prefix(&mut self) -> Option<nodes::Expr> {
         let mut e = nodes::Expr {
             location: Location::from(self.cur()),
             literal: None,
@@ -1860,6 +2079,7 @@ impl<'a> Parser<'a> {
             table: None,
             column: None,
             function: None,
+            operator: None,
             arguments: vec![],
         };
         match self.cur().ttype {
@@ -1935,6 +2155,19 @@ impl<'a> Parser<'a> {
                 e.bind = Some(bind);
             }
             Type::Ident(_) => return self.ident_expr(),
+            Type::BraceLeft => {
+                self.advance();
+                let expr = self.expr()?;
+                self.consume(Type::BraceRight);
+                return Some(expr);
+            }
+            Type::Plus | Type::Minus | Type::Tilde | Type::Keyword(Keyword::NOT) => {
+                let operator = self.prefix_operator().unwrap();
+                let location = Location::from(self.cur());
+                self.advance();
+                let argument = self.expr_bp(prefix_binding_power(&operator))?;
+                return Some(self.operator_expr(location, operator, vec![argument]));
+            }
             _ => {
                 let cur = self.cur().clone();
                 self.push_err(
@@ -1953,6 +2186,96 @@ impl<'a> Parser<'a> {
         Some(e)
     }
 
+    fn prefix_operator(&self) -> Option<String> {
+        match self.cur().ttype {
+            Type::Plus => Some("+".into()),
+            Type::Minus => Some("-".into()),
+            Type::Tilde => Some("~".into()),
+            Type::Keyword(Keyword::NOT) => Some("NOT".into()),
+            _ => None,
+        }
+    }
+
+    fn expr_operator(&self) -> Option<ExprOperator> {
+        match self.cur().ttype {
+            Type::Keyword(Keyword::OR) => Some(ExprOperator::infix("OR", 1, 2)),
+            Type::Keyword(Keyword::AND) => Some(ExprOperator::infix("AND", 3, 4)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::BETWEEN)) => {
+                Some(ExprOperator::between("NOT BETWEEN", 5, 6, 2))
+            }
+            Type::Keyword(Keyword::BETWEEN) => Some(ExprOperator::between("BETWEEN", 5, 6, 1)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::IN)) => {
+                Some(ExprOperator::in_list("NOT IN", 5, 2))
+            }
+            Type::Keyword(Keyword::IN) => Some(ExprOperator::in_list("IN", 5, 1)),
+            Type::Keyword(Keyword::IS)
+                if self.next_is(Type::Keyword(Keyword::DISTINCT))
+                    && self.nth_is(2, Type::Keyword(Keyword::FROM)) =>
+            {
+                Some(ExprOperator::infix_advanced("IS DISTINCT FROM", 5, 6, 3))
+            }
+            Type::Keyword(Keyword::IS)
+                if self.next_is(Type::Keyword(Keyword::NOT))
+                    && self.nth_is(2, Type::Keyword(Keyword::DISTINCT))
+                    && self.nth_is(3, Type::Keyword(Keyword::FROM)) =>
+            {
+                Some(ExprOperator::infix_advanced(
+                    "IS NOT DISTINCT FROM",
+                    5,
+                    6,
+                    4,
+                ))
+            }
+            Type::Keyword(Keyword::IS) if self.next_is(Type::Keyword(Keyword::NOT)) => {
+                Some(ExprOperator::infix_advanced("IS NOT", 5, 6, 2))
+            }
+            Type::Keyword(Keyword::IS) => Some(ExprOperator::infix("IS", 5, 6)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::LIKE)) => {
+                Some(ExprOperator::infix_advanced("NOT LIKE", 5, 6, 2))
+            }
+            Type::Keyword(Keyword::LIKE) => Some(ExprOperator::infix("LIKE", 5, 6)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::GLOB)) => {
+                Some(ExprOperator::infix_advanced("NOT GLOB", 5, 6, 2))
+            }
+            Type::Keyword(Keyword::GLOB) => Some(ExprOperator::infix("GLOB", 5, 6)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::MATCH)) => {
+                Some(ExprOperator::infix_advanced("NOT MATCH", 5, 6, 2))
+            }
+            Type::Keyword(Keyword::MATCH) => Some(ExprOperator::infix("MATCH", 5, 6)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::REGEXP)) => {
+                Some(ExprOperator::infix_advanced("NOT REGEXP", 5, 6, 2))
+            }
+            Type::Keyword(Keyword::REGEXP) => Some(ExprOperator::infix("REGEXP", 5, 6)),
+            Type::Keyword(Keyword::ESCAPE) => Some(ExprOperator::infix("ESCAPE", 5, 6)),
+            Type::Equal => Some(ExprOperator::infix("=", 5, 6)),
+            Type::EqualEqual => Some(ExprOperator::infix("==", 5, 6)),
+            Type::Less => Some(ExprOperator::infix("<", 5, 6)),
+            Type::LessEqual => Some(ExprOperator::infix("<=", 5, 6)),
+            Type::Greater => Some(ExprOperator::infix(">", 5, 6)),
+            Type::GreaterEqual => Some(ExprOperator::infix(">=", 5, 6)),
+            Type::NotEqual => Some(ExprOperator::infix("!=", 5, 6)),
+            Type::Ampersand => Some(ExprOperator::infix("&", 7, 8)),
+            Type::Pipe => Some(ExprOperator::infix("|", 7, 8)),
+            Type::ShiftLeft => Some(ExprOperator::infix("<<", 7, 8)),
+            Type::ShiftRight => Some(ExprOperator::infix(">>", 7, 8)),
+            Type::Plus => Some(ExprOperator::infix("+", 9, 10)),
+            Type::Minus => Some(ExprOperator::infix("-", 9, 10)),
+            Type::Asterisk => Some(ExprOperator::infix("*", 11, 12)),
+            Type::Slash => Some(ExprOperator::infix("/", 11, 12)),
+            Type::Percent => Some(ExprOperator::infix("%", 11, 12)),
+            Type::PipePipe => Some(ExprOperator::infix("||", 13, 14)),
+            Type::Arrow => Some(ExprOperator::infix("->", 13, 14)),
+            Type::ArrowArrow => Some(ExprOperator::infix("->>", 13, 14)),
+            Type::Keyword(Keyword::COLLATE) => Some(ExprOperator::infix("COLLATE", 15, 16)),
+            Type::Keyword(Keyword::ISNULL) => Some(ExprOperator::postfix("ISNULL", 5)),
+            Type::Keyword(Keyword::NOTNULL) => Some(ExprOperator::postfix("NOTNULL", 5)),
+            Type::Keyword(Keyword::NOT) if self.next_is(Type::Keyword(Keyword::NULL)) => {
+                Some(ExprOperator::postfix_advanced("NOT NULL", 5, 2))
+            }
+            _ => None,
+        }
+    }
+
     /// Parses an identifier-led expression.
     ///
     /// This covers the currently modelled subset of SQLite expressions:
@@ -1960,9 +2283,8 @@ impl<'a> Parser<'a> {
     /// - `[schema-name.][table-name.]<column-name>`
     /// - `function-name(function-arguments)`
     ///
-    /// Binary operators, filters, and window clauses are intentionally left for a fuller expression
-    /// grammar. This function still consumes the identifier-led shape so constraints and defaults do
-    /// not panic on common column references and function calls.
+    /// Operators are handled by the surrounding Pratt parser; this function consumes only the
+    /// identifier-led primary expression before operator binding continues.
     ///
     /// See: https://www.sqlite.org/lang_expr.html
     #[cfg_attr(feature = "trace", trace)]
@@ -1983,6 +2305,7 @@ impl<'a> Parser<'a> {
                 table: None,
                 column: None,
                 function: Some(first),
+                operator: None,
                 arguments: self.expr_arguments()?,
             });
         }
@@ -2023,6 +2346,7 @@ impl<'a> Parser<'a> {
             table,
             column,
             function: None,
+            operator: None,
             arguments: vec![],
         })
     }

@@ -1,9 +1,170 @@
 use crate::{
     error::Error,
-    parser::nodes::{Alter, CreateTable, Node},
+    parser::nodes::{Alter, CreateTable, CreateVirtualTable, Node},
     parser::nodes::{ColumnConstraint, ColumnDef, TableConstraint},
     types::{rules::Rule, storage::SqliteStorageClass},
 };
+
+#[derive(Clone, Copy)]
+struct VirtualTableModule {
+    name: &'static str,
+    doc: &'static str,
+    create_virtual_table: bool,
+}
+
+// https://www.sqlite.org/vtablist.html
+const VIRTUAL_TABLE_MODULES: &[VirtualTableModule] = &[
+    VirtualTableModule {
+        name: "bytecode",
+        doc: "https://www.sqlite.org/bytecodevtab.html",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "carray",
+        doc: "https://www.sqlite.org/carray.html",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "closure",
+        doc: "https://sqlite.org/src/file/ext/misc/closure.c",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "completion",
+        doc: "https://www.sqlite.org/completion.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "csv",
+        doc: "https://www.sqlite.org/csv.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "dbstat",
+        doc: "https://www.sqlite.org/dbstat.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "files_of_checkin",
+        doc: "https://fossil-scm.org/fossil/file/src/foci.c",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "fsdir",
+        doc: "https://sqlite.org/src/file/ext/misc/fileio.c",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "fts3",
+        doc: "https://www.sqlite.org/fts3.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "fts4",
+        doc: "https://www.sqlite.org/fts3.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "fts5",
+        doc: "https://www.sqlite.org/fts5.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "generate_series",
+        doc: "https://www.sqlite.org/series.html",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "json_each",
+        doc: "https://www.sqlite.org/json1.html#jeach",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "json_tree",
+        doc: "https://www.sqlite.org/json1.html#jtree",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "pragma",
+        doc: "https://www.sqlite.org/pragma.html#pragfunc",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "rtree",
+        doc: "https://www.sqlite.org/rtree.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "spellfix1",
+        doc: "https://www.sqlite.org/spellfix1.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "sqlite_btreeinfo",
+        doc: "https://sqlite.org/src/file/ext/misc/btreeinfo.c",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "sqlite_dbpage",
+        doc: "https://www.sqlite.org/dbpage.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "sqlite_memstat",
+        doc: "https://www.sqlite.org/memstat.html",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "sqlite_stmt",
+        doc: "https://www.sqlite.org/stmt.html",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "swarmvtab",
+        doc: "https://www.sqlite.org/swarmvtab.html#overview",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "tables_used",
+        doc: "https://www.sqlite.org/bytecodevtab.html",
+        create_virtual_table: false,
+    },
+    VirtualTableModule {
+        name: "tclvar",
+        doc: "https://sqlite.org/src/file/src/test_tclvar.c",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "templatevtab",
+        doc: "https://sqlite.org/src/file/ext/misc/templatevtab.c",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "unionvtab",
+        doc: "https://www.sqlite.org/unionvtab.html",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "vfsstat",
+        doc: "https://sqlite.org/src/file/ext/misc/vfsstat.c",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "vtablog",
+        doc: "https://sqlite.org/src/file/ext/misc/vtablog.c",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "wholenumber",
+        doc: "https://sqlite.org/src/file/ext/misc/wholenumber.c",
+        create_virtual_table: true,
+    },
+    VirtualTableModule {
+        name: "zipfile",
+        doc: "https://www.sqlite.org/zipfile.html",
+        create_virtual_table: true,
+    },
+];
 
 pub fn create_table(file: &str, table: &CreateTable) -> Vec<Error> {
     let mut diagnostics = table
@@ -30,6 +191,32 @@ pub fn create_table(file: &str, table: &CreateTable) -> Vec<Error> {
     );
 
     diagnostics
+}
+
+pub fn create_virtual_table(file: &str, table: &CreateVirtualTable) -> Vec<Error> {
+    let Some(module) = VIRTUAL_TABLE_MODULES
+        .iter()
+        .find(|module| module.name.eq_ignore_ascii_case(&table.module))
+    else {
+        // Applications can register their own virtual table modules, and SQLite's list is not
+        // exhaustive. Unknown modules are valid syntax and should not be diagnosed here.
+        return Vec::new();
+    };
+
+    if module.create_virtual_table {
+        return Vec::new();
+    }
+
+    vec![
+        Error::new(
+            file,
+            table.location,
+            Rule::SqliteUnsupported,
+            format!("`{}` is not documented for CREATE VIRTUAL TABLE", table.module),
+            "SQLite documents this virtual table module as a table-valued function or built-in virtual table, not as a module for CREATE VIRTUAL TABLE.",
+        )
+        .with_doc_url(module.doc),
+    ]
 }
 
 fn nullable_primary_key_diagnostics(file: &str, table: &CreateTable) -> Vec<Error> {
@@ -113,10 +300,10 @@ pub fn alter(file: &str, alter: &Alter) -> Vec<Error> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        analyse::create::{alter, create_table},
+        analyse::create::{alter, create_table, create_virtual_table},
         parser::nodes::{
-            Alter, ColumnConstraint, ColumnDef, CreateTable, IndexedColumn, SchemaTableContainer,
-            TableConstraint,
+            Alter, ColumnConstraint, ColumnDef, CreateTable, CreateVirtualTable, IndexedColumn,
+            SchemaTableContainer, TableConstraint,
         },
         types::{rules::Rule, storage::SqliteStorageClass},
     };
@@ -130,6 +317,16 @@ mod tests {
             vec![],
             strict,
             false,
+        )
+    }
+
+    fn create_virtual_table_node(module: &str) -> CreateVirtualTable {
+        CreateVirtualTable::new(
+            false,
+            false,
+            SchemaTableContainer::Table("items".into()),
+            module.into(),
+            vec![],
         )
     }
 
@@ -169,6 +366,45 @@ mod tests {
         let diagnostics = create_table("test.sql", &table);
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_known_create_virtual_table_modules() {
+        for module in ["fts5", "rtree", "dbstat", "zipfile"] {
+            let table = create_virtual_table_node(module);
+            let diagnostics = create_virtual_table("test.sql", &table);
+
+            assert!(
+                diagnostics.is_empty(),
+                "expected {module} to be accepted, got {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_unknown_create_virtual_table_modules() {
+        let table = create_virtual_table_node("application_defined_module");
+        let diagnostics = create_virtual_table("test.sql", &table);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn reports_table_valued_function_modules_in_create_virtual_table() {
+        let table = create_virtual_table_node("json_each");
+        let diagnostics = create_virtual_table("test.sql", &table);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::SqliteUnsupported);
+        assert!(
+            diagnostics[0]
+                .note
+                .contains("not as a module for CREATE VIRTUAL TABLE")
+        );
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/json1.html#jeach")
+        );
     }
 
     #[test]

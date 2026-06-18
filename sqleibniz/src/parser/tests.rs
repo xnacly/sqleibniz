@@ -42,9 +42,10 @@ mod should_pass {
     use crate::{
         parser::nodes::{
             Alter, ColumnConstraint, ColumnDef, CommonTableExpression, CreateTableAs, CreateView,
-            Delete, Expr, Insert, InsertSource, JoinOperator, LimitOffset, OrderingTerm,
-            QualifiedTableIndex, QualifiedTableName, ResultColumn, SchemaTableContainer, Select,
-            SelectQuantifier, SelectSource, SelectTable, Update, UpdateAssignment, With,
+            CreateVirtualTable, Delete, Expr, Insert, InsertSource, JoinOperator, LimitOffset,
+            OrderingTerm, QualifiedTableIndex, QualifiedTableName, ResultColumn,
+            SchemaTableContainer, Select, SelectQuantifier, SelectSource, SelectTable, Update,
+            UpdateAssignment, With,
         },
         types::{Keyword, Token, Type, storage::SqliteStorageClass},
     };
@@ -1252,6 +1253,59 @@ mod should_pass {
             },
             vec!["id".into()],
             Box::new(select_id_from("users")),
+        )]
+    }
+
+    test_group_pass_assert! {
+        create_virtual_table_stmt,
+
+        create_virtual_table_fts5:
+        r"CREATE VIRTUAL TABLE docs USING fts5(content, tokenize = 'porter');"=
+        vec![CreateVirtualTable::new(
+            false,
+            false,
+            SchemaTableContainer::Table("docs".into()),
+            "fts5".into(),
+            vec![
+                Token::new(Type::Ident("content".into())),
+                Token::new(Type::Comma),
+                Token::new(Type::Ident("tokenize".into())),
+                Token::new(Type::Equal),
+                Token::new(Type::String("porter".into())),
+            ],
+        )],
+
+        create_virtual_table_if_not_exists_schema:
+        r"CREATE VIRTUAL TABLE IF NOT EXISTS temp.spatial_index USING rtree(id, min_x, max_x, min_y, max_y);"=
+        vec![CreateVirtualTable::new(
+            false,
+            true,
+            SchemaTableContainer::SchemaAndTable {
+                schema: "temp".into(),
+                table: "spatial_index".into(),
+            },
+            "rtree".into(),
+            vec![
+                Token::new(Type::Ident("id".into())),
+                Token::new(Type::Comma),
+                Token::new(Type::Ident("min_x".into())),
+                Token::new(Type::Comma),
+                Token::new(Type::Ident("max_x".into())),
+                Token::new(Type::Comma),
+                Token::new(Type::Ident("min_y".into())),
+                Token::new(Type::Comma),
+                Token::new(Type::Ident("max_y".into())),
+            ],
+        )],
+
+        create_virtual_table_without_arguments:
+        r"CREATE VIRTUAL TABLE docs USING custom_module;"=
+        vec![CreateVirtualTable::new(
+            false,
+            false,
+            SchemaTableContainer::Table("docs".into()),
+            "custom_module".into(),
+            vec![],
         )]
     }
 
@@ -2490,7 +2544,11 @@ mod should_fail {
         invalid_foreign_key_match: "ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table MATCH wat;" => Rule::Syntax, "Wanted FULL, PARTIAL or SIMPLE after MATCH",
         create_table_empty_column_list: "CREATE TABLE users ();" => Rule::Syntax, "requires at least one column definition",
         create_table_trailing_comma: "CREATE TABLE users (id INTEGER,);" => Rule::Syntax, "Expected Ident(<name>)",
-        create_virtual_table_unimplemented: "CREATE VIRTUAL TABLE docs USING fts5(content);" => Rule::Unimplemented, "CREATE VIRTUAL TABLE is not yet supported",
+        create_virtual_table_missing_table: "CREATE VIRTUAL docs USING fts5(content);" => Rule::Syntax, "Wanted Keyword(TABLE)",
+        create_virtual_table_missing_using: "CREATE VIRTUAL TABLE docs fts5(content);" => Rule::Syntax, "Wanted Keyword(USING)",
+        create_virtual_table_missing_module: "CREATE VIRTUAL TABLE docs USING;" => Rule::Syntax, "Expected Ident(<module_name>)",
+        create_virtual_table_temp_invalid: "CREATE TEMP VIRTUAL TABLE docs USING fts5(content);" => Rule::Syntax, "CREATE VIRTUAL TABLE does not support TEMP or TEMPORARY",
+        create_virtual_table_unclosed_arguments: "CREATE VIRTUAL TABLE docs USING fts5(content;" => Rule::Syntax, "module argument list is missing ')'",
         create_table_unknown_option: "CREATE TABLE users (id INTEGER) ROWID;" => Rule::Syntax, "expected STRICT or WITHOUT ROWID",
         create_table_without_missing_rowid: "CREATE TABLE users (id INTEGER) WITHOUT;" => Rule::Syntax, "Wanted Keyword(ROWID)",
         create_table_option_trailing_comma: "CREATE TABLE users (id INTEGER) STRICT,;" => Rule::Syntax, "trailing comma",
@@ -2568,7 +2626,7 @@ mod should_fail {
         literal_cannot_start_statement: "12;" => Rule::Syntax, "can not start a statement",
 
         // create_stmt dispatch
-        create_unknown_object: "CREATE DATABASE foo;" => Rule::Syntax, "CREATE requires TABLE,INDEX,TRIGGER or VIEW",
+        create_unknown_object: "CREATE DATABASE foo;" => Rule::Syntax, "CREATE requires TABLE, INDEX, TRIGGER, VIEW or VIRTUAL",
 
         // alter_stmt dispatch
         alter_invalid_action: "ALTER TABLE t FOO;" => Rule::Syntax, "ALTER requires either RENAME, ADD or DROP",
@@ -2641,6 +2699,8 @@ mod should_analyze {
             "PRAGMA foreign_keys(true);" => Rule::Syntax, "query or assignment form",
         pragma_unsupported_documented_value:
             "PRAGMA foreign_keys = maybe;" => Rule::Syntax, "a boolean value",
+        create_virtual_table_table_valued_function_module:
+            "CREATE VIRTUAL TABLE items USING json_each(value);" => Rule::SqliteUnsupported, "not as a module for CREATE VIRTUAL TABLE",
         unknown_pragma:
             "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
@@ -2656,6 +2716,10 @@ mod should_analyze {
         ignore_check_constraints_disabled_has_no_recommendation:
             "PRAGMA ignore_check_constraints = 0;",
         known_pragma_without_analysis_rule_has_no_recommendation:
-            "PRAGMA application_id;"
+            "PRAGMA application_id;",
+        create_virtual_table_known_module_has_no_recommendation:
+            "CREATE VIRTUAL TABLE docs USING fts5(content);",
+        create_virtual_table_custom_module_has_no_recommendation:
+            "CREATE VIRTUAL TABLE docs USING application_defined_module(content);"
     }
 }

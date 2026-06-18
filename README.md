@@ -57,8 +57,8 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`create-index-stmt`](https://www.sqlite.org/lang_createindex.html)        | ✅              | ❌                | `CREATE INDEX idx_users_id ON users (id);`                |
 | [`create-table-stmt`](https://www.sqlite.org/lang_createtable.html)        | ✅              | ✅                | `CREATE TABLE users (id INTEGER) STRICT;`                 |
 | [`create-trigger-stmt`](https://www.sqlite.org/lang_createtrigger.html)    | ✅              | ❌                | `CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN SELECT 1; END;` |
-| [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ❌              | ❌                |                                                           |
-| [`create-virtual-table-stmt`](https://www.sqlite.org/lang_createvtab.html) | ❌              | ❌                |                                                           |
+| [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ✅              | ❌                | `CREATE VIEW active_users AS SELECT id FROM users;`       |
+| [`create-virtual-table-stmt`](https://www.sqlite.org/lang_createvtab.html) | ✅              | ✅                | `CREATE VIRTUAL TABLE docs USING fts5(content);`          |
 | [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ✅              | ❌                | `DELETE FROM users WHERE id = 1 RETURNING *;`             |
 | [`detach-stmt`](https://www.sqlite.org/lang_detach.html)                   | ✅              | ❌                | `DETACH DATABASE my_database;`                            |
 | [`drop-index-stmt`](https://www.sqlite.org/lang_dropindex.html)            | ✅              | ❌                | `DROP INDEX my_index;`                                    |

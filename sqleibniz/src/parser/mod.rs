@@ -543,11 +543,10 @@ impl<'a> Parser<'a> {
     /// Dispatches SQLite `CREATE` statements that sqleibniz currently models.
     ///
     /// Supported AST-producing forms are `CREATE TABLE`, `CREATE TABLE AS`, `CREATE INDEX`,
-    /// `CREATE VIEW`, and structurally parsed `CREATE TRIGGER` statements.
+    /// `CREATE VIEW`, `CREATE VIRTUAL TABLE`, and structurally parsed `CREATE TRIGGER` statements.
     ///
     /// Explicitly unsupported advanced forms are reported as `sqleibniz/unimplemented`:
     ///
-    /// - `CREATE VIRTUAL TABLE ... USING ...`
     /// - expression indexes
     /// - partial indexes
     ///
@@ -587,21 +586,12 @@ impl<'a> Parser<'a> {
             }
             // VIRTUAL TABLE ...
             Type::Keyword(Keyword::VIRTUAL) if !unique => {
-                let src = Location::from(self.cur());
-                self.push_doc_err(
-                    "Unimplemented",
-                    "CREATE VIRTUAL TABLE is not yet supported",
-                    src,
-                    Rule::Unimplemented,
-                    "https://www.sqlite.org/lang_createvtab.html",
-                );
-                self.skip_until_semicolon_or_eof();
-                None
+                self.create_virtual_table_stmt(location, temporary)
             }
             _ => {
                 let src = Location::from(self.cur());
                 let note = format!(
-                    "CREATE requires TABLE,INDEX,TRIGGER or VIEW at this point, got {:?}.",
+                    "CREATE requires TABLE, INDEX, TRIGGER, VIEW or VIRTUAL at this point, got {:?}.",
                     self.cur().ttype
                 );
                 self.push_doc_err(
@@ -706,6 +696,119 @@ impl<'a> Parser<'a> {
             strict,
             without_rowid,
         })
+    }
+
+    /// https://www.sqlite.org/lang_createvtab.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn create_virtual_table_stmt(
+        &mut self,
+        location: Location,
+        temporary: bool,
+    ) -> Option<Box<dyn nodes::Node>> {
+        if temporary {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Unexpected Token",
+                "CREATE VIRTUAL TABLE does not support TEMP or TEMPORARY",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_createvtab.html",
+            );
+        }
+
+        // VIRTUAL TABLE
+        self.consume_keyword(Keyword::VIRTUAL);
+        self.consume_keyword(Keyword::TABLE);
+
+        // IF NOT EXISTS
+        let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
+            self.consume_keyword(Keyword::NOT);
+            self.consume_keyword(Keyword::EXISTS);
+            true
+        } else {
+            false
+        };
+
+        // <schema-name.table-name|table-name>
+        let name = self.schema_table_container(Some("table"))?;
+
+        // USING <module-name>
+        self.consume_keyword(Keyword::USING);
+        let module =
+            self.consume_ident("https://www.sqlite.org/lang_createvtab.html", "module_name")?;
+
+        // [(<module-argument>, ...)]
+        let arguments = if self.consume_if(Type::BraceLeft) {
+            self.virtual_table_module_arguments()?
+        } else {
+            vec![]
+        };
+
+        self.expect_end("https://www.sqlite.org/lang_createvtab.html");
+
+        some_box!(nodes::CreateVirtualTable {
+            location,
+            temporary,
+            if_not_exists,
+            name,
+            module,
+            arguments,
+        })
+    }
+
+    /// https://www.sqlite.org/lang_createvtab.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn virtual_table_module_arguments(&mut self) -> Option<Vec<Token>> {
+        let mut arguments = vec![];
+        let mut depth = 1usize;
+
+        loop {
+            if self.is_eof() {
+                let src = Location::from(self.cur());
+                self.push_doc_err(
+                    "Malformed virtual table arguments",
+                    "CREATE VIRTUAL TABLE module argument list is missing ')'",
+                    src,
+                    Rule::Syntax,
+                    "https://www.sqlite.org/lang_createvtab.html",
+                );
+                return None;
+            }
+
+            match self.cur().ttype {
+                Type::BraceLeft => {
+                    depth += 1;
+                    arguments.push(self.cur().clone());
+                    self.advance();
+                }
+                Type::BraceRight => {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.advance();
+                        break;
+                    }
+                    arguments.push(self.cur().clone());
+                    self.advance();
+                }
+                Type::Semicolon if depth == 1 => {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed virtual table arguments",
+                        "CREATE VIRTUAL TABLE module argument list is missing ')'",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_createvtab.html",
+                    );
+                    return None;
+                }
+                _ => {
+                    arguments.push(self.cur().clone());
+                    self.advance();
+                }
+            }
+        }
+
+        Some(arguments)
     }
 
     /// https://www.sqlite.org/syntax/table-options.html

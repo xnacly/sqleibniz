@@ -118,6 +118,10 @@ CREATE TABLE archived_user_ids AS SELECT id FROM users;
 CREATE VIEW active_users AS SELECT id FROM users;
 CREATE TEMP VIEW IF NOT EXISTS temp.active_user_ids (id) AS SELECT id FROM users;
 
+-- https://www.sqlite.org/lang_createvtab.html
+CREATE VIRTUAL TABLE docs USING fts5(content, tokenize = 'porter');
+CREATE VIRTUAL TABLE temp.spatial_index USING rtree(id, min_x, max_x, min_y, max_y);
+
 -- https://www.sqlite.org/lang_createindex.html
 CREATE INDEX idx_users_id ON users (id);
 CREATE UNIQUE INDEX IF NOT EXISTS main.idx_users_email ON users (email);

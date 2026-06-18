@@ -803,6 +803,25 @@ CREATE TEMP VIEW IF NOT EXISTS schema.view_name (id) AS SELECT id FROM table_nam
 );
 
 node!(
+    CreateVirtualTable,
+    r"CREATE VIRTUAL TABLE statement, see: https://www.sqlite.org/lang_createvtab.html
+
+The CREATE VIRTUAL TABLE command creates a virtual table backed by a module.
+
+```sql
+CREATE VIRTUAL TABLE docs USING fts5(content);
+CREATE VIRTUAL TABLE spatial_index USING rtree(id, min_x, max_x, min_y, max_y);
+```
+",
+    temporary: bool,
+    if_not_exists: bool,
+    name: SchemaTableContainer,
+    module: String,
+    arguments: Vec<Token>
+    ; analyse(crate::analyse::create::create_virtual_table)
+);
+
+node!(
     With,
     r"WITH statement, see: https://www.sqlite.org/lang_with.html
 

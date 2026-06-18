@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     parser::nodes::{Pragma, PragmaInvocation, SchemaTableContainer},
-    types::{Keyword, Token, Type, rules::Rule},
+    types::{Token, Type, rules::Rule},
 };
 
 pub fn pragma(file: &str, pragma: &Pragma) -> Vec<Error> {
@@ -577,7 +577,7 @@ const PRAGMAS: &[PragmaEntry] = &[
 ];
 
 fn foreign_keys(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
-    if !assigned_or_called_with(pragma, is_off) {
+    if !assigned_or_called_with(pragma, |token| token.pragma_boolean() == Some(false)) {
         return None;
     }
 
@@ -594,7 +594,7 @@ fn foreign_keys(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Er
 }
 
 fn ignore_check_constraints(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
-    if !assigned_or_called_with(pragma, is_on) {
+    if !assigned_or_called_with(pragma, |token| token.pragma_boolean() == Some(true)) {
         return None;
     }
 
@@ -611,7 +611,7 @@ fn ignore_check_constraints(file: &str, doc_url: &'static str, pragma: &Pragma) 
 }
 
 fn writable_schema(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
-    if !assigned_or_called_with(pragma, is_on) {
+    if !assigned_or_called_with(pragma, |token| token.pragma_boolean() == Some(true)) {
         return None;
     }
 
@@ -642,18 +642,8 @@ fn assigned_or_called_with(pragma: &Pragma, predicate: fn(&Token) -> bool) -> bo
     }
 }
 
-fn is_on(token: &Token) -> bool {
-    match &token.ttype {
-        Type::Boolean(true) => true,
-        Type::Number(number) => *number != 0.0,
-        Type::Keyword(Keyword::ON) => true,
-        Type::Ident(value) | Type::String(value) => matches_on(value),
-        _ => false,
-    }
-}
-
 fn is_boolean(token: &Token) -> bool {
-    is_on(token) || is_off(token)
+    token.is_pragma_boolean()
 }
 
 fn is_integer(token: &Token) -> bool {
@@ -683,23 +673,6 @@ fn token_text(token: &Token) -> Option<&str> {
         Type::Keyword(keyword) => Some((*keyword).into()),
         _ => None,
     }
-}
-
-fn is_off(token: &Token) -> bool {
-    match &token.ttype {
-        Type::Boolean(false) => true,
-        Type::Number(number) => *number == 0.0,
-        Type::Ident(value) | Type::String(value) => matches_off(value),
-        _ => false,
-    }
-}
-
-fn matches_on(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "on" | "yes" | "true")
-}
-
-fn matches_off(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "off" | "no" | "false")
 }
 
 #[cfg(test)]

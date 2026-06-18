@@ -158,6 +158,35 @@ pub struct Token {
     pub line: usize,
 }
 
+impl Token {
+    /// Returns the SQLite PRAGMA boolean value represented by this token, if any.
+    ///
+    /// SQLite PRAGMAs accept several boolean spellings: integer `0` and `1`, boolean literals,
+    /// and the names `on`, `off`, `yes`, `no`, `true`, and `false`.
+    pub fn pragma_boolean(&self) -> Option<bool> {
+        match &self.ttype {
+            Type::Boolean(boolean) => Some(*boolean),
+            Type::Number(number) if *number == 0.0 => Some(false),
+            Type::Number(number) if *number == 1.0 => Some(true),
+            Type::Keyword(keyword) => match keyword {
+                keyword::Keyword::ON => Some(true),
+                keyword::Keyword::NO => Some(false),
+                _ => None,
+            },
+            Type::Ident(value) | Type::String(value) => match value.to_ascii_lowercase().as_str() {
+                "on" | "yes" | "true" => Some(true),
+                "off" | "no" | "false" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn is_pragma_boolean(&self) -> bool {
+        self.pragma_boolean().is_some()
+    }
+}
+
 #[cfg(test)]
 impl Token {
     pub fn new(ttype: Type) -> Self {
@@ -167,5 +196,46 @@ impl Token {
             end: 0,
             line: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::{Keyword, Token, Type};
+
+    #[test]
+    fn matches_pragma_boolean_spellings() {
+        assert_eq!(Token::new(Type::Boolean(true)).pragma_boolean(), Some(true));
+        assert_eq!(
+            Token::new(Type::Boolean(false)).pragma_boolean(),
+            Some(false)
+        );
+        assert_eq!(Token::new(Type::Number(1.0)).pragma_boolean(), Some(true));
+        assert_eq!(Token::new(Type::Number(0.0)).pragma_boolean(), Some(false));
+        assert_eq!(
+            Token::new(Type::Keyword(Keyword::ON)).pragma_boolean(),
+            Some(true)
+        );
+        assert_eq!(
+            Token::new(Type::Keyword(Keyword::NO)).pragma_boolean(),
+            Some(false)
+        );
+        assert_eq!(
+            Token::new(Type::Ident("yes".into())).pragma_boolean(),
+            Some(true)
+        );
+        assert_eq!(
+            Token::new(Type::String("off".into())).pragma_boolean(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn rejects_non_boolean_pragma_values() {
+        assert_eq!(Token::new(Type::Number(2.0)).pragma_boolean(), None);
+        assert_eq!(
+            Token::new(Type::Ident("maybe".into())).pragma_boolean(),
+            None
+        );
     }
 }

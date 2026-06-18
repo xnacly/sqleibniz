@@ -59,7 +59,7 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`create-trigger-stmt`](https://www.sqlite.org/lang_createtrigger.html)    | ✅              | ❌                | `CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN SELECT 1; END;` |
 | [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ❌              | ❌                |                                                           |
 | [`create-virtual-table-stmt`](https://www.sqlite.org/lang_createvtab.html) | ❌              | ❌                |                                                           |
-| [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ❌              | ❌                |                                                           |
+| [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ✅              | ❌                | `DELETE FROM users WHERE id = 1 RETURNING *;`             |
 | [`detach-stmt`](https://www.sqlite.org/lang_detach.html)                   | ✅              | ❌                | `DETACH DATABASE my_database;`                            |
 | [`drop-index-stmt`](https://www.sqlite.org/lang_dropindex.html)            | ✅              | ❌                | `DROP INDEX my_index;`                                    |
 | [`drop-table-stmt`](https://www.sqlite.org/lang_droptable.html)            | ✅              | ❌                | `DROP TABLE my_table;`                                    |

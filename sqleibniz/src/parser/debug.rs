@@ -45,10 +45,53 @@ impl_field_serializable_with_serde_to_value!(
     Type,
     PragmaInvocation,
     IndexedColumn,
+    QualifiedTableIndex,
     TriggerTiming,
     TriggerEvent,
     TriggerBodyStmt
 );
+
+impl FieldSerializable for QualifiedTableName {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "alias": self.alias,
+            "index": self.index,
+        })
+    }
+}
+
+impl FieldSerializable for ReturningColumn {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        match self {
+            ReturningColumn::Star => serde_json::json!({ "star": true }),
+            ReturningColumn::TableStar(table) => serde_json::json!({ "table_star": table }),
+            ReturningColumn::Expr { expr, alias } => serde_json::json!({
+                "expr": expr.as_serializable(),
+                "alias": alias,
+            }),
+        }
+    }
+}
+
+impl FieldSerializable for OrderingTerm {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::json!({
+            "expr": self.expr.as_serializable(),
+            "order": self.order,
+            "nulls": self.nulls,
+        })
+    }
+}
+
+impl FieldSerializable for DeleteLimit {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::json!({
+            "limit": self.limit.as_serializable(),
+            "offset": self.offset.as_ref().map(|expr| expr.as_serializable()),
+        })
+    }
+}
 
 impl FieldSerializable for ColumnConstraint {
     fn field_as_serializable(&self) -> serde_json::Value {
@@ -221,10 +264,37 @@ impl_empty_field_hook_contexts!(
     SqliteStorageClass,
     SchemaTableContainer,
     IndexedColumn,
+    QualifiedTableIndex,
+    QualifiedTableName,
     TriggerTiming,
     TriggerEvent,
     TriggerBodyStmt
 );
+
+impl FieldHookContexts for ReturningColumn {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            ReturningColumn::Expr { expr, .. } => expr.field_hook_contexts(),
+            ReturningColumn::Star | ReturningColumn::TableStar(_) => vec![],
+        }
+    }
+}
+
+impl FieldHookContexts for OrderingTerm {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        self.expr.field_hook_contexts()
+    }
+}
+
+impl FieldHookContexts for DeleteLimit {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        let mut contexts = self.limit.field_hook_contexts();
+        if let Some(offset) = &self.offset {
+            contexts.extend(offset.field_hook_contexts());
+        }
+        contexts
+    }
+}
 
 impl FieldHookContexts for PragmaInvocation {
     fn field_hook_contexts(&self) -> Vec<HookContext> {

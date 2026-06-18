@@ -40,7 +40,10 @@ macro_rules! test_group_pass_assert {
 #[cfg(test)]
 mod should_pass {
     use crate::{
-        parser::nodes::{Alter, ColumnConstraint, ColumnDef, Expr, SchemaTableContainer},
+        parser::nodes::{
+            Alter, ColumnConstraint, ColumnDef, Delete, DeleteLimit, Expr, OrderingTerm,
+            QualifiedTableIndex, QualifiedTableName, ReturningColumn, SchemaTableContainer,
+        },
         types::{Token, Type, storage::SqliteStorageClass},
     };
 
@@ -107,6 +110,24 @@ mod should_pass {
             Some(operator.into()),
             arguments,
         )
+    }
+
+    fn qtable(name: SchemaTableContainer) -> QualifiedTableName {
+        QualifiedTableName {
+            name,
+            alias: None,
+            index: None,
+        }
+    }
+
+    fn delete(
+        target: QualifiedTableName,
+        where_expr: Option<Expr>,
+        returning: Vec<ReturningColumn>,
+        order_by: Vec<OrderingTerm>,
+        limit: Option<DeleteLimit>,
+    ) -> Vec<Delete> {
+        vec![Delete::new(target, where_expr, returning, order_by, limit)]
     }
 
     test_group_pass_assert! {
@@ -215,6 +236,101 @@ mod should_pass {
                 })
             )
         ]
+    }
+
+    test_group_pass_assert! {
+        delete_stmt,
+
+        delete_from_table:
+        r"DELETE FROM users;"=delete(
+            qtable(SchemaTableContainer::Table("users".into())),
+            None,
+            vec![],
+            vec![],
+            None,
+        ),
+
+        delete_from_schema_table:
+        r"DELETE FROM main.users;"=delete(
+            qtable(SchemaTableContainer::SchemaAndTable { schema: "main".into(), table: "users".into() }),
+            None,
+            vec![],
+            vec![],
+            None,
+        ),
+
+        delete_where:
+        r"DELETE FROM users WHERE id = 1;"=delete(
+            qtable(SchemaTableContainer::Table("users".into())),
+            Some(op("=", vec![col("id"), num(1.0)])),
+            vec![],
+            vec![],
+            None,
+        ),
+
+        delete_alias_indexed:
+        r"DELETE FROM users AS u INDEXED BY idx_users_id WHERE u.id = 1;"=delete(
+            QualifiedTableName {
+                name: SchemaTableContainer::Table("users".into()),
+                alias: Some("u".into()),
+                index: Some(QualifiedTableIndex::IndexedBy("idx_users_id".into())),
+            },
+            Some(op("=", vec![
+                Expr::new(None, None, None, Some("u".into()), Some("id".into()), None, None, vec![]),
+                num(1.0),
+            ])),
+            vec![],
+            vec![],
+            None,
+        ),
+
+        delete_not_indexed:
+        r"DELETE FROM users u NOT INDEXED;"=delete(
+            QualifiedTableName {
+                name: SchemaTableContainer::Table("users".into()),
+                alias: Some("u".into()),
+                index: Some(QualifiedTableIndex::NotIndexed),
+            },
+            None,
+            vec![],
+            vec![],
+            None,
+        ),
+
+        delete_returning:
+        r"DELETE FROM users WHERE id = 1 RETURNING *, users.*, id AS deleted_id, name;"=delete(
+            qtable(SchemaTableContainer::Table("users".into())),
+            Some(op("=", vec![col("id"), num(1.0)])),
+            vec![
+                ReturningColumn::Star,
+                ReturningColumn::TableStar("users".into()),
+                ReturningColumn::Expr { expr: col("id"), alias: Some("deleted_id".into()) },
+                ReturningColumn::Expr { expr: col("name"), alias: None },
+            ],
+            vec![],
+            None,
+        ),
+
+        delete_order_limit:
+        r"DELETE FROM logs WHERE created_at < 10 ORDER BY created_at DESC NULLS LAST, id ASC LIMIT 5 OFFSET 2;"=delete(
+            qtable(SchemaTableContainer::Table("logs".into())),
+            Some(op("<", vec![col("created_at"), num(10.0)])),
+            vec![],
+            vec![
+                OrderingTerm { expr: col("created_at"), order: Some(Keyword::DESC), nulls: Some(Keyword::LAST) },
+                OrderingTerm { expr: col("id"), order: Some(Keyword::ASC), nulls: None },
+            ],
+            Some(DeleteLimit { limit: num(5.0), offset: Some(num(2.0)) }),
+        ),
+
+        delete_limit_comma_offset:
+        r"DELETE FROM logs LIMIT 5, 2;"=delete(
+            qtable(SchemaTableContainer::Table("logs".into())),
+            None,
+            vec![],
+            vec![],
+            Some(DeleteLimit { limit: num(5.0), offset: Some(num(2.0)) }),
+        )
     }
 
     test_group_pass_assert! {
@@ -1830,6 +1946,16 @@ mod should_fail {
         create_trigger_body_missing_semicolon: "CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN SELECT 1 END;" => Rule::Semicolon, "terminate statements with ';'",
         create_trigger_empty_body: "CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN END;" => Rule::Syntax, "body requires at least one trigger statement",
         create_trigger_invalid_body_stmt: "CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN PRAGMA database_list; END;" => Rule::Syntax, "body expected DELETE, INSERT, SELECT or UPDATE",
+        delete_missing_from: "DELETE users;" => Rule::Syntax, "Wanted Keyword(FROM)",
+        delete_missing_table: "DELETE FROM;" => Rule::Syntax, "expected either schema_name.table or table",
+        delete_indexed_missing_by: "DELETE FROM users INDEXED idx;" => Rule::Syntax, "Wanted Keyword(BY)",
+        delete_not_indexed_missing_indexed: "DELETE FROM users NOT idx;" => Rule::Syntax, "Wanted Keyword(INDEXED)",
+        delete_returning_trailing_comma: "DELETE FROM users RETURNING id,;" => Rule::Syntax, "RETURNING column list has a trailing comma",
+        delete_order_by_trailing_comma: "DELETE FROM users ORDER BY id, LIMIT 1;" => Rule::Syntax, "ORDER BY term list has a trailing comma",
+        delete_order_by_nulls_invalid: "DELETE FROM users ORDER BY id NULLS NO;" => Rule::Syntax, "Wanted FIRST or LAST after NULLS",
+        delete_with_select_unimplemented: "WITH stale AS (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
+        delete_with_recursive_select_unimplemented: "WITH RECURSIVE stale AS NOT MATERIALIZED (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
+        delete_with_body_unimplemented: "WITH stale AS (VALUES (1)) DELETE FROM users;" => Rule::Unimplemented, "WITH common table expression bodies require select-stmt support",
 
         // sql_stmt dispatch
         unknown_keyword_suggestion: "usrs;" => Rule::UnknownKeyword, "did you mean one of",

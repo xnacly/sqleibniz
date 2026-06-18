@@ -125,6 +125,12 @@ CREATE TRIGGER user_au AFTER UPDATE ON users BEGIN UPDATE users SET name = new.n
 CREATE TEMP TRIGGER IF NOT EXISTS temp.user_update INSTEAD OF UPDATE OF name, email ON users FOR EACH ROW WHEN old_name BEGIN UPDATE users SET name = new.name; END;
 CREATE TRIGGER user_ad BEFORE DELETE ON users BEGIN INSERT INTO audit VALUES (old.id); DELETE FROM sessions WHERE user_id = old.id; END;
 
+-- https://www.sqlite.org/lang_delete.html
+DELETE FROM users;
+DELETE FROM main.users WHERE id = 1;
+DELETE FROM logs WHERE created_at < 10 ORDER BY created_at DESC NULLS LAST LIMIT 5 OFFSET 2;
+DELETE FROM users WHERE id = 1 RETURNING *, users.*, id AS deleted_id;
+
 -- https://www.sqlite.org/pragma.html
 PRAGMA database_list;
 PRAGMA schema.cache_size = 5;

@@ -367,6 +367,61 @@ DROP VIEW IF EXISTS schema_name.view_name;
     argument: SchemaTableContainer
 );
 
+#[derive(Debug, serde::Serialize)]
+pub enum QualifiedTableIndex {
+    IndexedBy(String),
+    NotIndexed,
+}
+
+#[derive(Debug)]
+pub struct QualifiedTableName {
+    pub name: SchemaTableContainer,
+    pub alias: Option<String>,
+    pub index: Option<QualifiedTableIndex>,
+}
+
+#[derive(Debug)]
+pub enum ReturningColumn {
+    Star,
+    TableStar(String),
+    Expr { expr: Expr, alias: Option<String> },
+}
+
+#[derive(Debug)]
+pub struct OrderingTerm {
+    pub expr: Expr,
+    pub order: Option<Keyword>,
+    pub nulls: Option<Keyword>,
+}
+
+#[derive(Debug)]
+pub struct DeleteLimit {
+    pub limit: Expr,
+    pub offset: Option<Expr>,
+}
+
+node!(
+    Delete,
+    r"DELETE statement, see: https://www.sqlite.org/lang_delete.html
+
+The DELETE command removes records from a table. This node represents SQLite's DELETE statement
+envelope after `DELETE FROM`: qualified table metadata, WHERE, RETURNING, ORDER BY, and LIMIT
+clauses. `WITH` is recognized by the parser only so SELECT-based common table expressions can
+produce a precise unsupported diagnostic until SELECT parsing exists.
+
+```sql
+DELETE FROM table_name;
+DELETE FROM schema_name.table_name WHERE id = 1;
+DELETE FROM users AS u INDEXED BY idx_users_id WHERE u.id = 1 RETURNING *;
+```
+",
+    target: QualifiedTableName,
+    where_expr: Option<Expr>,
+    returning: Vec<ReturningColumn>,
+    order_by: Vec<OrderingTerm>,
+    limit: Option<DeleteLimit>
+);
+
 node!(
     Savepoint,
     r"Savepoint stmt, see: https://www.sqlite.org/lang_savepoint.html

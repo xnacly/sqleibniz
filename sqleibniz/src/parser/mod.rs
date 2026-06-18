@@ -442,6 +442,7 @@ impl<'a> Parser<'a> {
             Type::Keyword(Keyword::SAVEPOINT) => self.savepoint_stmt(),
             Type::Keyword(Keyword::DROP) => self.drop_stmt(),
             Type::Keyword(Keyword::ANALYZE) => self.analyze_stmt(),
+            Type::Keyword(Keyword::DELETE) | Type::Keyword(Keyword::WITH) => self.delete_stmt(),
             Type::Keyword(Keyword::DETACH) => self.detach_stmt(),
             Type::Keyword(Keyword::ROLLBACK) => self.rollback_stmt(),
             Type::Keyword(Keyword::COMMIT) | Type::Keyword(Keyword::END) => self.commit_stmt(),
@@ -1623,6 +1624,340 @@ impl<'a> Parser<'a> {
         self.expect_end("https://www.sqlite.org/lang_analyze.html");
 
         some_box!(a)
+    }
+
+    /// https://www.sqlite.org/lang_delete.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn delete_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let location = Location::from(self.cur());
+
+        // WITH <common-table-expression>, ...
+        // Common table expressions require SELECT support, so this branch currently validates the
+        // envelope only far enough to report SELECT as explicitly unimplemented.
+        if self.consume_if_keyword(Keyword::WITH) {
+            self.with_clause_before_delete()?;
+        }
+
+        // DELETE FROM <qualified-table-name>
+        self.consume_keyword(Keyword::DELETE);
+        self.consume_keyword(Keyword::FROM);
+        let target = self.qualified_table_name()?;
+
+        // WHERE <expr>
+        let where_expr = if self.consume_if_keyword(Keyword::WHERE) {
+            Some(self.expr()?)
+        } else {
+            None
+        };
+
+        // RETURNING <result-column>, ...
+        let returning = if self.consume_if_keyword(Keyword::RETURNING) {
+            self.returning_clause()?
+        } else {
+            vec![]
+        };
+
+        // ORDER BY <ordering-term>, ...
+        let order_by = if self.consume_if_keyword(Keyword::ORDER) {
+            self.consume_keyword(Keyword::BY);
+            self.ordering_term_list()?
+        } else {
+            vec![]
+        };
+
+        // LIMIT <expr> [OFFSET <expr> | , <expr>]
+        let limit = if self.consume_if_keyword(Keyword::LIMIT) {
+            Some(self.delete_limit_clause()?)
+        } else {
+            None
+        };
+
+        self.expect_end("https://www.sqlite.org/lang_delete.html");
+
+        some_box!(nodes::Delete {
+            location,
+            target,
+            where_expr,
+            returning,
+            order_by,
+            limit,
+        })
+    }
+
+    /// Parses `WITH [RECURSIVE] <common-table-expression>, ...` before DELETE.
+    ///
+    /// CTE bodies require select-stmt support. Since sqleibniz does not model select-stmt yet,
+    /// this validates the CTE envelope only far enough to report the body as unimplemented.
+    #[cfg_attr(feature = "trace", trace)]
+    fn with_clause_before_delete(&mut self) -> Option<()> {
+        // RECURSIVE
+        self.consume_if_keyword(Keyword::RECURSIVE);
+
+        loop {
+            // <common-table-expression>
+            self.common_table_expression_before_delete()?;
+
+            // , <common-table-expression>
+            if self.consume_if(Type::Comma) {
+                if self.is_keyword(Keyword::DELETE) || self.is(Type::Semicolon) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed WITH clause",
+                        "WITH common table expression list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/common-table-expression.html",
+                    );
+                    return None;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        if self.is_keyword(Keyword::DELETE) {
+            Some(())
+        } else {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Malformed DELETE statement",
+                "WITH before DELETE requires DELETE after the common table expressions",
+                src,
+                Rule::Syntax,
+                "https://www.sqlite.org/lang_delete.html",
+            );
+            None
+        }
+    }
+
+    /// https://www.sqlite.org/syntax/common-table-expression.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn common_table_expression_before_delete(&mut self) -> Option<()> {
+        // <table-name>
+        self.consume_ident(
+            "https://www.sqlite.org/syntax/common-table-expression.html",
+            "table_name",
+        )?;
+
+        // (<column-name>, ...)
+        if self.consume_if(Type::BraceLeft) {
+            self.column_name_list("WITH common table expression")?;
+            self.consume(Type::BraceRight);
+        }
+
+        // AS [NOT] MATERIALIZED
+        self.consume_keyword(Keyword::AS);
+        if self.consume_if_keyword(Keyword::NOT) {
+            self.consume_keyword(Keyword::MATERIALIZED);
+        } else {
+            self.consume_if_keyword(Keyword::MATERIALIZED);
+        }
+
+        // (<select-stmt>)
+        self.consume(Type::BraceLeft);
+        self.reject_cte_body_before_delete()
+    }
+
+    /// Rejects a CTE body until select-stmt parsing exists.
+    ///
+    /// See: https://www.sqlite.org/syntax/common-table-expression.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn reject_cte_body_before_delete(&mut self) -> Option<()> {
+        let src = Location::from(self.cur());
+        if self.is_keyword(Keyword::SELECT) {
+            self.push_doc_err(
+                "Unimplemented",
+                "SELECT in WITH common table expressions is not yet supported",
+                src,
+                Rule::Unimplemented,
+                "https://www.sqlite.org/lang_select.html",
+            );
+        } else {
+            self.push_doc_err(
+                "Unimplemented",
+                "WITH common table expression bodies require select-stmt support, which is not yet implemented",
+                src,
+                Rule::Unimplemented,
+                "https://www.sqlite.org/lang_select.html",
+            );
+        }
+        self.skip_until_semicolon_or_eof();
+        None
+    }
+
+    /// https://www.sqlite.org/syntax/qualified-table-name.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn qualified_table_name(&mut self) -> Option<nodes::QualifiedTableName> {
+        // [schema-name.]table-name
+        let name = self.schema_table_container(Some("table"))?;
+
+        // [AS] alias
+        let alias = if self.consume_if_keyword(Keyword::AS) {
+            Some(self.consume_ident(
+                "https://www.sqlite.org/syntax/qualified-table-name.html",
+                "alias",
+            )?)
+        } else if matches!(self.cur().ttype, Type::Ident(_)) {
+            Some(self.consume_ident(
+                "https://www.sqlite.org/syntax/qualified-table-name.html",
+                "alias",
+            )?)
+        } else {
+            None
+        };
+
+        // INDEXED BY <index-name> | NOT INDEXED
+        let index = if self.consume_if_keyword(Keyword::INDEXED) {
+            self.consume_keyword(Keyword::BY);
+            Some(nodes::QualifiedTableIndex::IndexedBy(self.consume_ident(
+                "https://www.sqlite.org/syntax/qualified-table-name.html",
+                "index_name",
+            )?))
+        } else if self.consume_if_keyword(Keyword::NOT) {
+            self.consume_keyword(Keyword::INDEXED);
+            Some(nodes::QualifiedTableIndex::NotIndexed)
+        } else {
+            None
+        };
+
+        Some(nodes::QualifiedTableName { name, alias, index })
+    }
+
+    /// https://www.sqlite.org/syntax/returning-clause.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn returning_clause(&mut self) -> Option<Vec<nodes::ReturningColumn>> {
+        let mut columns = vec![];
+        loop {
+            // <returning-column>
+            columns.push(self.returning_column()?);
+
+            // , <returning-column>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon)
+                    || self.is_keyword(Keyword::ORDER)
+                    || self.is_keyword(Keyword::LIMIT)
+                {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed RETURNING clause",
+                        "RETURNING column list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/returning-clause.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        Some(columns)
+    }
+
+    /// https://www.sqlite.org/syntax/returning-clause.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn returning_column(&mut self) -> Option<nodes::ReturningColumn> {
+        // *
+        if self.consume_if(Type::Asterisk) {
+            return Some(nodes::ReturningColumn::Star);
+        }
+
+        // <table-name>.*
+        if let Type::Ident(table) = self.cur().ttype.clone() {
+            if self.next_is(Type::Dot) && self.nth_is(2, Type::Asterisk) {
+                self.advance();
+                self.advance();
+                self.advance();
+                return Some(nodes::ReturningColumn::TableStar(table));
+            }
+        }
+
+        // <expr> [AS <column-alias>]
+        let expr = self.expr()?;
+        let alias = if self.consume_if_keyword(Keyword::AS) {
+            Some(self.consume_ident(
+                "https://www.sqlite.org/syntax/returning-clause.html",
+                "column_alias",
+            )?)
+        } else {
+            None
+        };
+
+        Some(nodes::ReturningColumn::Expr { expr, alias })
+    }
+
+    /// https://www.sqlite.org/syntax/ordering-term.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn ordering_term_list(&mut self) -> Option<Vec<nodes::OrderingTerm>> {
+        let mut terms = vec![];
+        loop {
+            // <ordering-term>
+            terms.push(self.ordering_term()?);
+
+            // , <ordering-term>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon) || self.is_keyword(Keyword::LIMIT) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed ORDER BY clause",
+                        "ORDER BY term list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/ordering-term.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        Some(terms)
+    }
+
+    /// https://www.sqlite.org/syntax/ordering-term.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn ordering_term(&mut self) -> Option<nodes::OrderingTerm> {
+        // <expr>
+        let expr = self.expr()?;
+
+        // ASC | DESC
+        let order = self.consume_optional_keyword(&[Keyword::ASC, Keyword::DESC]);
+
+        // NULLS FIRST | NULLS LAST
+        let nulls = if self.consume_if_keyword(Keyword::NULLS) {
+            Some(self.consume_required_keyword(
+                &[Keyword::FIRST, Keyword::LAST],
+                "https://www.sqlite.org/syntax/ordering-term.html",
+                "Wanted FIRST or LAST after NULLS",
+            )?)
+        } else {
+            None
+        };
+
+        Some(nodes::OrderingTerm { expr, order, nulls })
+    }
+
+    /// https://www.sqlite.org/syntax/delete-stmt-limited.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn delete_limit_clause(&mut self) -> Option<nodes::DeleteLimit> {
+        // LIMIT <expr>
+        let limit = self.expr()?;
+
+        // OFFSET <expr> | , <expr>
+        let offset = if self.consume_if(Type::Comma) {
+            Some(self.expr()?)
+        } else if self.consume_if_keyword(Keyword::OFFSET) {
+            Some(self.expr()?)
+        } else {
+            None
+        };
+
+        Some(nodes::DeleteLimit { limit, offset })
     }
 
     /// https://www.sqlite.org/syntax/detach-stmt.html
@@ -3105,6 +3440,30 @@ impl<'a> Parser<'a> {
             self.advance();
             Some(keyword)
         } else {
+            None
+        }
+    }
+
+    fn consume_required_keyword(
+        &mut self,
+        keywords: &[Keyword],
+        doc: &'static str,
+        note: &'static str,
+    ) -> Option<Keyword> {
+        let Type::Keyword(keyword) = self.cur().ttype else {
+            let src = Location::from(self.cur());
+            self.push_doc_err("Unexpected Token", note, src, Rule::Syntax, doc);
+            self.advance();
+            return None;
+        };
+
+        if keywords.contains(&keyword) {
+            self.advance();
+            Some(keyword)
+        } else {
+            let src = Location::from(self.cur());
+            self.push_doc_err("Unexpected Token", note, src, Rule::Syntax, doc);
+            self.advance();
             None
         }
     }

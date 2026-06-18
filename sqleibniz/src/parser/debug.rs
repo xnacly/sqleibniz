@@ -25,7 +25,11 @@ pub trait FieldHookContexts {
 }
 
 pub trait FieldDiagnostics {
-    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error>;
+    fn field_diagnostics(
+        &self,
+        file: &str,
+        context: &mut crate::analyse::AnalysisContext,
+    ) -> Vec<crate::error::Error>;
 }
 
 macro_rules! impl_empty_field_hook_contexts {
@@ -44,8 +48,13 @@ macro_rules! impl_empty_field_diagnostics {
     ($($tt:ty),*) => {
         $(
             impl FieldDiagnostics for $tt {
-                fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+                fn field_diagnostics(
+                    &self,
+                    file: &str,
+                    context: &mut crate::analyse::AnalysisContext,
+                ) -> Vec<crate::error::Error> {
                     let _ = file;
+                    let _ = context;
                     vec![]
                 }
             }
@@ -195,10 +204,14 @@ impl FieldHookContexts for InsertSource {
 }
 
 impl FieldDiagnostics for InsertSource {
-    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+    fn field_diagnostics(
+        &self,
+        file: &str,
+        context: &mut crate::analyse::AnalysisContext,
+    ) -> Vec<crate::error::Error> {
         match self {
             InsertSource::DefaultValues | InsertSource::Values(_) => vec![],
-            InsertSource::Select(select) => select.analyse(file),
+            InsertSource::Select(select) => select.analyse(file, context),
         }
     }
 }
@@ -210,8 +223,12 @@ impl FieldHookContexts for CommonTableExpression {
 }
 
 impl FieldDiagnostics for CommonTableExpression {
-    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
-        self.select.analyse(file)
+    fn field_diagnostics(
+        &self,
+        file: &str,
+        context: &mut crate::analyse::AnalysisContext,
+    ) -> Vec<crate::error::Error> {
+        self.select.analyse(file, context)
     }
 }
 
@@ -356,8 +373,12 @@ impl<T: Node + ?Sized> FieldHookContexts for Box<T> {
 }
 
 impl<T: Node + ?Sized> FieldDiagnostics for Box<T> {
-    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
-        self.analyse(file)
+    fn field_diagnostics(
+        &self,
+        file: &str,
+        context: &mut crate::analyse::AnalysisContext,
+    ) -> Vec<crate::error::Error> {
+        self.analyse(file, context)
     }
 }
 
@@ -380,9 +401,13 @@ impl<T: FieldHookContexts> FieldHookContexts for Option<T> {
 }
 
 impl<T: FieldDiagnostics> FieldDiagnostics for Option<T> {
-    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+    fn field_diagnostics(
+        &self,
+        file: &str,
+        context: &mut crate::analyse::AnalysisContext,
+    ) -> Vec<crate::error::Error> {
         match self {
-            Some(n) => n.field_diagnostics(file),
+            Some(n) => n.field_diagnostics(file, context),
             None => vec![],
         }
     }
@@ -401,9 +426,13 @@ impl<T: FieldHookContexts> FieldHookContexts for Vec<T> {
 }
 
 impl<T: FieldDiagnostics> FieldDiagnostics for Vec<T> {
-    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+    fn field_diagnostics(
+        &self,
+        file: &str,
+        context: &mut crate::analyse::AnalysisContext,
+    ) -> Vec<crate::error::Error> {
         self.iter()
-            .flat_map(|n| n.field_diagnostics(file))
+            .flat_map(|n| n.field_diagnostics(file, context))
             .collect()
     }
 }

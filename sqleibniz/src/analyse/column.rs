@@ -1,6 +1,8 @@
-use crate::{error::Error, parser::nodes::ColumnDef, types::rules::Rule};
+use crate::{analyse::AnalysisContext, error::Error, parser::nodes::ColumnDef, types::rules::Rule};
 
-pub fn column_def(file: &str, column: &ColumnDef) -> Vec<Error> {
+pub fn column_def(file: &str, context: &mut AnalysisContext, column: &ColumnDef) -> Vec<Error> {
+    let _ = context;
+
     if column.type_name.is_some() {
         return Vec::new();
     }
@@ -20,7 +22,7 @@ pub fn column_def(file: &str, column: &ColumnDef) -> Vec<Error> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        analyse::column::column_def,
+        analyse::{AnalysisContext, column::column_def},
         parser::nodes::ColumnDef,
         types::{rules::Rule, storage::SqliteStorageClass},
     };
@@ -28,8 +30,9 @@ mod tests {
     #[test]
     fn reports_columns_without_declared_type() {
         let column = ColumnDef::new("name".into(), None, vec![]);
+        let mut context = AnalysisContext::default();
 
-        let diagnostics = column_def("test.sql", &column);
+        let diagnostics = column_def("test.sql", &mut context, &column);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].file, "test.sql");
@@ -49,8 +52,9 @@ mod tests {
     #[test]
     fn accepts_columns_with_declared_type() {
         let column = ColumnDef::new("name".into(), Some(SqliteStorageClass::Text), vec![]);
+        let mut context = AnalysisContext::default();
 
-        let diagnostics = column_def("test.sql", &column);
+        let diagnostics = column_def("test.sql", &mut context, &column);
 
         assert!(diagnostics.is_empty());
     }

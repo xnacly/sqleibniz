@@ -101,12 +101,7 @@ fn analyze_document(
     let mut p = Parser::new(tokens.clone(), name);
     let ast = p.parse();
     errors.append(&mut p.errors);
-    errors.append(
-        &mut ast
-            .iter()
-            .flat_map(|node| node.analyse(name))
-            .collect::<Vec<_>>(),
-    );
+    errors.append(&mut crate::analyse::run(name, &ast));
     if let (Some(hooks), Some(lua)) = (hooks, lua) {
         errors.append(&mut hooks::run(lua, name, hooks, &ast, &tokens));
     }

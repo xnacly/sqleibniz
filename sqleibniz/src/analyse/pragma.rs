@@ -1,10 +1,13 @@
 use crate::{
+    analyse::AnalysisContext,
     error::Error,
     parser::nodes::{Pragma, PragmaInvocation, SchemaTableContainer},
     types::{Token, Type, rules::Rule},
 };
 
-pub fn pragma(file: &str, pragma: &Pragma) -> Vec<Error> {
+pub fn pragma(file: &str, context: &mut AnalysisContext, pragma: &Pragma) -> Vec<Error> {
+    let _ = context;
+
     let name = pragma_name(pragma);
 
     let Some(entry) = PRAGMAS.iter().find(|entry| entry.name == name) else {
@@ -696,7 +699,10 @@ fn invocation_value_matches(pragma: &Pragma, predicate: impl FnOnce(&Token) -> b
 #[cfg(test)]
 mod tests {
     use crate::{
-        analyse::pragma::{PRAGMAS, PragmaAnalysis, pragma},
+        analyse::{
+            AnalysisContext,
+            pragma::{PRAGMAS, PragmaAnalysis, pragma},
+        },
         parser::nodes::{Pragma, PragmaInvocation, SchemaTableContainer},
         types::{Token, Type, rules::Rule},
     };
@@ -712,6 +718,11 @@ mod tests {
                 value: Token::new(value),
             },
         )
+    }
+
+    fn pragma_diagnostics(pragma_node: &Pragma) -> Vec<crate::error::Error> {
+        let mut context = AnalysisContext::default();
+        pragma("test.sql", &mut context, pragma_node)
     }
 
     #[test]
@@ -762,10 +773,8 @@ mod tests {
 
     #[test]
     fn reports_deprecated_pragmas() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node("case_sensitive_like", PragmaInvocation::Query),
-        );
+        let diagnostics =
+            pragma_diagnostics(&pragma_node("case_sensitive_like", PragmaInvocation::Query));
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::Quirk);
@@ -778,15 +787,12 @@ mod tests {
 
     #[test]
     fn reports_unsupported_invocation_forms() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node(
-                "foreign_keys",
-                PragmaInvocation::Call {
-                    value: Token::new(Type::Boolean(true)),
-                },
-            ),
-        );
+        let diagnostics = pragma_diagnostics(&pragma_node(
+            "foreign_keys",
+            PragmaInvocation::Call {
+                value: Token::new(Type::Boolean(true)),
+            },
+        ));
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::Syntax);
@@ -799,15 +805,12 @@ mod tests {
 
     #[test]
     fn reports_unsupported_values() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node(
-                "foreign_keys",
-                PragmaInvocation::Assign {
-                    value: Token::new(Type::Ident("maybe".into())),
-                },
-            ),
-        );
+        let diagnostics = pragma_diagnostics(&pragma_node(
+            "foreign_keys",
+            PragmaInvocation::Assign {
+                value: Token::new(Type::Ident("maybe".into())),
+            },
+        ));
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::Syntax);
@@ -820,10 +823,10 @@ mod tests {
 
     #[test]
     fn reports_unknown_pragmas() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node("some_extension_pragma", PragmaInvocation::Query),
-        );
+        let diagnostics = pragma_diagnostics(&pragma_node(
+            "some_extension_pragma",
+            PragmaInvocation::Query,
+        ));
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::UnknownPragma);
@@ -840,25 +843,20 @@ mod tests {
 
     #[test]
     fn accepts_known_pragmas_without_analysis_rules() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node("application_id", PragmaInvocation::Query),
-        );
+        let diagnostics =
+            pragma_diagnostics(&pragma_node("application_id", PragmaInvocation::Query));
 
         assert!(diagnostics.is_empty());
     }
 
     #[test]
     fn reports_foreign_key_enforcement_disabled() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node(
-                "foreign_keys",
-                PragmaInvocation::Assign {
-                    value: Token::new(Type::Boolean(false)),
-                },
-            ),
-        );
+        let diagnostics = pragma_diagnostics(&pragma_node(
+            "foreign_keys",
+            PragmaInvocation::Assign {
+                value: Token::new(Type::Boolean(false)),
+            },
+        ));
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].note.contains("foreign key constraints"));
@@ -866,19 +864,14 @@ mod tests {
 
     #[test]
     fn accepts_foreign_key_query_and_enabled_values() {
-        let query_diagnostics = pragma(
-            "test.sql",
-            &pragma_node("foreign_keys", PragmaInvocation::Query),
-        );
-        let enabled_diagnostics = pragma(
-            "test.sql",
-            &pragma_node(
-                "foreign_keys",
-                PragmaInvocation::Assign {
-                    value: Token::new(Type::Boolean(true)),
-                },
-            ),
-        );
+        let query_diagnostics =
+            pragma_diagnostics(&pragma_node("foreign_keys", PragmaInvocation::Query));
+        let enabled_diagnostics = pragma_diagnostics(&pragma_node(
+            "foreign_keys",
+            PragmaInvocation::Assign {
+                value: Token::new(Type::Boolean(true)),
+            },
+        ));
 
         assert!(query_diagnostics.is_empty());
         assert!(enabled_diagnostics.is_empty());
@@ -886,15 +879,12 @@ mod tests {
 
     #[test]
     fn reports_ignored_check_constraints() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node(
-                "ignore_check_constraints",
-                PragmaInvocation::Assign {
-                    value: Token::new(Type::Number(1.0)),
-                },
-            ),
-        );
+        let diagnostics = pragma_diagnostics(&pragma_node(
+            "ignore_check_constraints",
+            PragmaInvocation::Assign {
+                value: Token::new(Type::Number(1.0)),
+            },
+        ));
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].note.contains("CHECK constraint enforcement"));
@@ -902,15 +892,12 @@ mod tests {
 
     #[test]
     fn reports_writable_schema_enabled() {
-        let diagnostics = pragma(
-            "test.sql",
-            &pragma_node(
-                "writable_schema",
-                PragmaInvocation::Assign {
-                    value: Token::new(Type::Ident("ON".into())),
-                },
-            ),
-        );
+        let diagnostics = pragma_diagnostics(&pragma_node(
+            "writable_schema",
+            PragmaInvocation::Assign {
+                value: Token::new(Type::Ident("ON".into())),
+            },
+        ));
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].note.contains("corrupt the database"));

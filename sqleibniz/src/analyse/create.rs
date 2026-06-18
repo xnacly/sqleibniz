@@ -1,6 +1,7 @@
 use crate::{
+    analyse::{AnalysisContext, Column, RelationKind},
     error::Error,
-    parser::nodes::{Alter, CreateTable, CreateVirtualTable, Node},
+    parser::nodes::{Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, Node},
     parser::nodes::{ColumnConstraint, ColumnDef, TableConstraint},
     types::{rules::Rule, storage::SqliteStorageClass},
 };
@@ -166,11 +167,17 @@ const VIRTUAL_TABLE_MODULES: &[VirtualTableModule] = &[
     },
 ];
 
-pub fn create_table(file: &str, table: &CreateTable) -> Vec<Error> {
+pub fn create_table(file: &str, context: &mut AnalysisContext, table: &CreateTable) -> Vec<Error> {
+    context.define_relation_with_columns(
+        &table.name,
+        RelationKind::Table,
+        table.columns.iter().map(Column::from).collect(),
+    );
+
     let mut diagnostics = table
         .columns
         .iter()
-        .flat_map(|column| column.analyse(file))
+        .flat_map(|column| column.analyse(file, context))
         .collect::<Vec<_>>();
 
     diagnostics.append(&mut nullable_primary_key_diagnostics(file, table));
@@ -193,7 +200,29 @@ pub fn create_table(file: &str, table: &CreateTable) -> Vec<Error> {
     diagnostics
 }
 
-pub fn create_virtual_table(file: &str, table: &CreateVirtualTable) -> Vec<Error> {
+pub fn create_table_as(
+    file: &str,
+    context: &mut AnalysisContext,
+    table: &CreateTableAs,
+) -> Vec<Error> {
+    let diagnostics = table.select.analyse(file, context);
+    context.define_relation(&table.name, RelationKind::Table);
+    diagnostics
+}
+
+pub fn create_view(file: &str, context: &mut AnalysisContext, view: &CreateView) -> Vec<Error> {
+    let diagnostics = view.select.analyse(file, context);
+    context.define_relation(&view.name, RelationKind::View);
+    diagnostics
+}
+
+pub fn create_virtual_table(
+    file: &str,
+    context: &mut AnalysisContext,
+    table: &CreateVirtualTable,
+) -> Vec<Error> {
+    context.define_relation(&table.name, RelationKind::VirtualTable);
+
     let Some(module) = VIRTUAL_TABLE_MODULES
         .iter()
         .find(|module| module.name.eq_ignore_ascii_case(&table.module))
@@ -289,21 +318,25 @@ fn nullable_primary_key_error(file: &str, column: &ColumnDef) -> Error {
     .with_doc_url("https://www.sqlite.org/quirks.html#primary_keys_can_sometimes_contain_nulls")
 }
 
-pub fn alter(file: &str, alter: &Alter) -> Vec<Error> {
+pub fn alter(file: &str, context: &mut AnalysisContext, alter: &Alter) -> Vec<Error> {
     alter
         .add_column
         .as_ref()
-        .map(|column| column.analyse(file))
+        .map(|column| column.analyse(file, context))
         .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        analyse::create::{alter, create_table, create_virtual_table},
+        analyse::{
+            AnalysisContext, Column, RelationKind,
+            create::{alter, create_table, create_virtual_table},
+        },
         parser::nodes::{
-            Alter, ColumnConstraint, ColumnDef, CreateTable, CreateVirtualTable, IndexedColumn,
-            SchemaTableContainer, TableConstraint,
+            Alter, ColumnConstraint, ColumnDef, CreateTable, CreateTableAs, CreateView,
+            CreateVirtualTable, IndexedColumn, ResultColumn, SchemaTableContainer, Select,
+            SelectQuantifier, TableConstraint,
         },
         types::{rules::Rule, storage::SqliteStorageClass},
     };
@@ -330,6 +363,40 @@ mod tests {
         )
     }
 
+    fn empty_select() -> Select {
+        Select::new(
+            None::<SelectQuantifier>,
+            vec![ResultColumn::Star],
+            vec![],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        )
+    }
+
+    fn create_table_diagnostics(
+        table: &CreateTable,
+    ) -> (Vec<crate::error::Error>, AnalysisContext) {
+        let mut context = AnalysisContext::default();
+        let diagnostics = create_table("test.sql", &mut context, table);
+        (diagnostics, context)
+    }
+
+    fn create_virtual_table_diagnostics(
+        table: &CreateVirtualTable,
+    ) -> (Vec<crate::error::Error>, AnalysisContext) {
+        let mut context = AnalysisContext::default();
+        let diagnostics = create_virtual_table("test.sql", &mut context, table);
+        (diagnostics, context)
+    }
+
+    fn alter_diagnostics(alter_node: &Alter) -> Vec<crate::error::Error> {
+        let mut context = AnalysisContext::default();
+        alter("test.sql", &mut context, alter_node)
+    }
+
     #[test]
     fn recommends_strict_for_non_strict_tables() {
         let table = create_table_node(
@@ -341,9 +408,26 @@ mod tests {
             false,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, context) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            context
+                .relation(&SchemaTableContainer::Table("users".into()))
+                .unwrap()
+                .kind,
+            RelationKind::Table
+        );
+        assert_eq!(
+            context
+                .relation(&SchemaTableContainer::Table("users".into()))
+                .unwrap()
+                .columns,
+            vec![Column {
+                name: "id".into(),
+                type_name: Some(SqliteStorageClass::Integer),
+            }]
+        );
         assert_eq!(diagnostics[0].rule, Rule::Quirk);
         assert!(diagnostics[0].note.contains("Add STRICT"));
         assert_eq!(
@@ -363,7 +447,7 @@ mod tests {
             true,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert!(diagnostics.is_empty());
     }
@@ -372,11 +456,18 @@ mod tests {
     fn accepts_known_create_virtual_table_modules() {
         for module in ["fts5", "rtree", "dbstat", "zipfile"] {
             let table = create_virtual_table_node(module);
-            let diagnostics = create_virtual_table("test.sql", &table);
+            let (diagnostics, context) = create_virtual_table_diagnostics(&table);
 
             assert!(
                 diagnostics.is_empty(),
                 "expected {module} to be accepted, got {diagnostics:?}"
+            );
+            assert_eq!(
+                context
+                    .relation(&SchemaTableContainer::Table("items".into()))
+                    .unwrap()
+                    .kind,
+                RelationKind::VirtualTable
             );
         }
     }
@@ -384,15 +475,22 @@ mod tests {
     #[test]
     fn accepts_unknown_create_virtual_table_modules() {
         let table = create_virtual_table_node("application_defined_module");
-        let diagnostics = create_virtual_table("test.sql", &table);
+        let (diagnostics, context) = create_virtual_table_diagnostics(&table);
 
         assert!(diagnostics.is_empty());
+        assert_eq!(
+            context
+                .relation(&SchemaTableContainer::Table("items".into()))
+                .unwrap()
+                .kind,
+            RelationKind::VirtualTable
+        );
     }
 
     #[test]
     fn reports_table_valued_function_modules_in_create_virtual_table() {
         let table = create_virtual_table_node("json_each");
-        let diagnostics = create_virtual_table("test.sql", &table);
+        let (diagnostics, _) = create_virtual_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::SqliteUnsupported);
@@ -411,7 +509,7 @@ mod tests {
     fn includes_column_diagnostics_for_create_table_columns() {
         let table = create_table_node(vec![ColumnDef::new("name".into(), None, vec![])], true);
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::Quirk);
@@ -426,7 +524,7 @@ mod tests {
     fn includes_column_and_strict_diagnostics_for_non_strict_tables() {
         let table = create_table_node(vec![ColumnDef::new("name".into(), None, vec![])], false);
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 2);
         assert!(diagnostics.iter().any(|diagnostic| {
@@ -456,7 +554,7 @@ mod tests {
             false,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 2);
         let diagnostic = diagnostics
@@ -485,7 +583,7 @@ mod tests {
             false,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].note.contains("Add STRICT"));
@@ -509,7 +607,7 @@ mod tests {
             true,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert!(diagnostics.is_empty());
     }
@@ -537,7 +635,7 @@ mod tests {
             false,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 2);
         assert!(
@@ -567,7 +665,7 @@ mod tests {
             true,
         );
 
-        let diagnostics = create_table("test.sql", &table);
+        let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].note.contains("Add STRICT"));
@@ -584,7 +682,7 @@ mod tests {
             None,
         );
 
-        let diagnostics = alter("test.sql", &alter_node);
+        let diagnostics = alter_diagnostics(&alter_node);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, Rule::Quirk);
@@ -606,8 +704,53 @@ mod tests {
             None,
         );
 
-        let diagnostics = alter("test.sql", &alter_node);
+        let diagnostics = alter_diagnostics(&alter_node);
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn registers_create_table_as_relations() {
+        let table = CreateTableAs::new(
+            false,
+            false,
+            SchemaTableContainer::Table("snapshot".into()),
+            Box::new(empty_select()),
+        );
+        let mut context = AnalysisContext::default();
+
+        let diagnostics = super::create_table_as("test.sql", &mut context, &table);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            context
+                .relation(&SchemaTableContainer::Table("snapshot".into()))
+                .unwrap()
+                .kind,
+            RelationKind::Table
+        );
+    }
+
+    #[test]
+    fn registers_create_view_relations() {
+        let view = CreateView::new(
+            false,
+            false,
+            SchemaTableContainer::Table("active_users".into()),
+            vec![],
+            Box::new(empty_select()),
+        );
+        let mut context = AnalysisContext::default();
+
+        let diagnostics = super::create_view("test.sql", &mut context, &view);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            context
+                .relation(&SchemaTableContainer::Table("active_users".into()))
+                .unwrap()
+                .kind,
+            RelationKind::View
+        );
     }
 }

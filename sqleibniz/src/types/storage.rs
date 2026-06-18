@@ -3,7 +3,7 @@ use std::fmt::Display;
 use serde::Serialize;
 
 /// see: https://sqlite.org/datatype3.html#storage_classes_and_datatypes
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum SqliteStorageClass {
     Null,
     Integer,

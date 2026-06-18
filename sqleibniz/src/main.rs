@@ -215,12 +215,7 @@ fn main() {
 
             errors.append(&mut parser.errors);
             if !args.no_analyse {
-                errors.append(
-                    &mut ast
-                        .iter()
-                        .flat_map(|node| node.analyse(&file.name))
-                        .collect::<Vec<_>>(),
-                );
+                errors.append(&mut sqleibniz::analyse::run(&file.name, &ast));
             }
 
             if let Some(hooks) = config.hooks.as_deref() {

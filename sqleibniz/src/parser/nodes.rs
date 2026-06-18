@@ -1,3 +1,4 @@
+use crate::analyse::AnalysisContext;
 use crate::error::{Error, Location};
 use crate::parser::debug::{FieldDiagnostics, FieldHookContexts, FieldSerializable};
 use crate::types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass};
@@ -19,16 +20,17 @@ macro_rules! field_hook_contexts {
 }
 
 macro_rules! field_diagnostics {
-    ($file:expr,) => {
+    ($file:expr, $context:expr,) => {
         {
             let _ = $file;
+            let _ = $context;
             Vec::new()
         }
     };
-    ($file:expr, $($field:expr),+ $(,)?) => {
+    ($file:expr, $context:expr, $($field:expr),+ $(,)?) => {
         vec![
             $(
-                $field.field_diagnostics($file),
+                $field.field_diagnostics($file, $context),
             )+
         ]
         .into_iter()
@@ -38,11 +40,11 @@ macro_rules! field_diagnostics {
 }
 
 macro_rules! node_diagnostics {
-    ($file:expr, [$($field:expr),*], $analyser:path, $node:expr) => {{
-        $analyser($file, $node)
+    ($file:expr, $context:expr, [$($field:expr),*], $analyser:path, $node:expr) => {{
+        $analyser($file, $context, $node)
     }};
-    ($file:expr, [$($field:expr),*], $node:expr) => {
-        field_diagnostics!($file, $($field),*)
+    ($file:expr, $context:expr, [$($field:expr),*], $node:expr) => {
+        field_diagnostics!($file, $context, $($field),*)
     };
 }
 
@@ -105,8 +107,8 @@ macro_rules! node {
                 $documentation
             }
 
-            fn analyse(&self, file: &str) -> Vec<Error> {
-                node_diagnostics!(file, [$(self.$field_name),*] $(, $analyser)?, self)
+            fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
+                node_diagnostics!(file, context, [$(self.$field_name),*] $(, $analyser)?, self)
             }
         }
 
@@ -146,8 +148,9 @@ pub trait Node: std::fmt::Debug {
     /// returns the documentation url for sefl
     fn doc(&self) -> &str;
     /// returns diagnostics found by analysing this node after parsing
-    fn analyse(&self, file: &str) -> Vec<Error> {
+    fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
         let _ = file;
+        let _ = context;
         Vec::new()
     }
 }
@@ -329,7 +332,7 @@ ANALYZE schema_name.index_or_table_name;
 );
 
 /// SchemaTableContainer contains either schema_name.table_name or table_name
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SchemaTableContainer {
     /// schema_name.table_name
     SchemaAndTable { schema: String, table: String },
@@ -782,6 +785,7 @@ CREATE TEMP TABLE IF NOT EXISTS schema.table_name AS SELECT id FROM old_table;
     if_not_exists: bool,
     name: SchemaTableContainer,
     select: Box<Select>
+    ; analyse(crate::analyse::create::create_table_as)
 );
 
 node!(
@@ -800,6 +804,7 @@ CREATE TEMP VIEW IF NOT EXISTS schema.view_name (id) AS SELECT id FROM table_nam
     name: SchemaTableContainer,
     columns: Vec<String>,
     select: Box<Select>
+    ; analyse(crate::analyse::create::create_view)
 );
 
 node!(

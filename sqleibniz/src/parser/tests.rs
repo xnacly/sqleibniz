@@ -2459,10 +2459,7 @@ macro_rules! test_group_analysis_assert {
                 let ast = parser.parse();
                 assert_eq!(parser.errors.len(), 0);
 
-                let diagnostics = ast
-                    .iter()
-                    .flat_map(|node| node.analyse("parser_test_analysis"))
-                    .collect::<Vec<_>>();
+                let diagnostics = crate::analyse::run("parser_test_analysis", &ast);
                 assert!(
                     diagnostics
                         .iter()
@@ -2496,10 +2493,7 @@ macro_rules! test_group_analysis_pass {
                 let ast = parser.parse();
                 assert_eq!(parser.errors.len(), 0);
 
-                let diagnostics = ast
-                    .iter()
-                    .flat_map(|node| node.analyse("parser_test_analysis"))
-                    .collect::<Vec<_>>();
+                let diagnostics = crate::analyse::run("parser_test_analysis", &ast);
                 assert_eq!(diagnostics.len(), 0);
             }
         )*

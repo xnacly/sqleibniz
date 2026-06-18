@@ -16,7 +16,7 @@ dynamic correctness. See below for a list of currently implemented features.
 
 - [ ] static analysis (syntax and semantic analysis)
   - [x] syntax analysis - sqleibniz aims to implement the syntax [sqlite understands](https://www.sqlite.org/lang.html)
-  - [ ] warn for sqlites [quirks](https://www.sqlite.org/quirks.html)
+  - [x] warn for sqlites [quirks](https://www.sqlite.org/quirks.html)
   - [ ] do the used tables exist / were they created beforehand
   - [ ] do the used columns exist / were they created beforehand
   - [ ] do the used functions exist / were they created beforehand
@@ -49,14 +49,14 @@ dynamic correctness. See below for a list of currently implemented features.
 | `sqlite` specification                                                     | syntax analysis | semantic analysis | Example                                                   |
 | -------------------------------------------------------------------------- | --------------- | ----------------- | --------------------------------------------------------- |
 | [`explain-stmt`](https://www.sqlite.org/lang_explain.html)                 | ✅              | ❌                | `EXPLAIN QUERY PLAN;`                                     |
-| [`alter-table-stmt`](https://www.sqlite.org/lang_altertable.html)          | ✅              | ❌                | `ALTER TABLE schema.table_name ADD new_column_name TEXT;` |
+| [`alter-table-stmt`](https://www.sqlite.org/lang_altertable.html)          | ✅              | ✅                | `ALTER TABLE schema.table_name ADD new_column_name TEXT;` |
 | [`analyze-stmt`](https://www.sqlite.org/lang_analyze.html)                 | ✅              | ❌                | `ANALYZE my_table;`                                       |
 | [`attach-stmt`](https://www.sqlite.org/lang_attach.html)                   | ✅              | ❌                | `ATTACH DATABASE 'users.db' AS users;`                    |
 | [`begin-stmt`](https://www.sqlite.org/lang_transaction.html)               | ✅              | ❌                | `BEGIN DEFERRED TRANSACTION;`                             |
 | [`commit-stmt`](https://www.sqlite.org/lang_transaction.html)              | ✅              | ❌                | `END TRANSACTION;`                                        |
-| [`create-index-stmt`](https://www.sqlite.org/lang_createindex.html)        | ❌              | ❌                |                                                           |
-| [`create-table-stmt`](https://www.sqlite.org/lang_createtable.html)        | ❌              | ❌                |                                                           |
-| [`create-trigger-stmt`](https://www.sqlite.org/lang_createtrigger.html)    | ❌              | ❌                |                                                           |
+| [`create-index-stmt`](https://www.sqlite.org/lang_createindex.html)        | ✅              | ❌                | `CREATE INDEX idx_users_id ON users (id);`                |
+| [`create-table-stmt`](https://www.sqlite.org/lang_createtable.html)        | ✅              | ✅                | `CREATE TABLE users (id INTEGER) STRICT;`                 |
+| [`create-trigger-stmt`](https://www.sqlite.org/lang_createtrigger.html)    | ✅              | ❌                | `CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN SELECT 1; END;` |
 | [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ❌              | ❌                |                                                           |
 | [`create-virtual-table-stmt`](https://www.sqlite.org/lang_createvtab.html) | ❌              | ❌                |                                                           |
 | [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ❌              | ❌                |                                                           |

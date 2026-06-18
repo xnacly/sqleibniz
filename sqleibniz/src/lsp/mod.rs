@@ -101,6 +101,12 @@ fn analyze_document(
     let mut p = Parser::new(tokens.clone(), name);
     let ast = p.parse();
     errors.append(&mut p.errors);
+    errors.append(
+        &mut ast
+            .iter()
+            .flat_map(|node| node.analyze(name))
+            .collect::<Vec<_>>(),
+    );
     if let (Some(hooks), Some(lua)) = (hooks, lua) {
         errors.append(&mut hooks::run(lua, name, hooks, &ast, &tokens));
     }
@@ -370,6 +376,18 @@ mod tests {
         let filtered = filter_errors(&errors, &[Rule::Hook]);
 
         assert_eq!(filtered, vec![error(Rule::Syntax)]);
+    }
+
+    #[test]
+    fn node_analysis_runs_in_lsp_diagnostics() {
+        let state = analyze_document(b"CREATE TABLE users (id INTEGER);", "test.sql", None, None);
+
+        assert!(
+            state
+                .errors
+                .iter()
+                .any(|error| { error.rule == Rule::Quirk && error.note.contains("Add STRICT") })
+        );
     }
 
     #[test]

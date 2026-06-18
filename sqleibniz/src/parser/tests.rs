@@ -1393,6 +1393,73 @@ macro_rules! test_group_fail_assert {
     };
 }
 
+#[allow(unused_macros)]
+macro_rules! test_group_analysis_assert {
+    ($group_name:ident,$($ident:ident:$input:literal => $rule:expr, $note:literal),*) => {
+    mod $group_name {
+        use crate::{lexer, parser::Parser, types::rules::Rule};
+
+        $(
+            #[test]
+            fn $ident() {
+                let input = $input.as_bytes().to_vec();
+                let mut l = lexer::Lexer::new(&input, "parser_test_analysis");
+                let toks = l.run();
+                assert_eq!(l.errors.len(), 0);
+
+                let mut parser = Parser::new(toks, "parser_test_analysis");
+                let ast = parser.parse();
+                assert_eq!(parser.errors.len(), 0);
+
+                let diagnostics = ast
+                    .iter()
+                    .flat_map(|node| node.analyze("parser_test_analysis"))
+                    .collect::<Vec<_>>();
+                assert_eq!(diagnostics.len(), 1);
+
+                let error = &diagnostics[0];
+                assert_eq!(error.rule, $rule);
+                assert!(
+                    error.note.contains($note),
+                    "expected note to contain {:?}, got {:?}",
+                    $note,
+                    error.note
+                );
+            }
+        )*
+        }
+    };
+}
+
+#[allow(unused_macros)]
+macro_rules! test_group_analysis_pass {
+    ($group_name:ident,$($ident:ident:$input:literal),*) => {
+    mod $group_name {
+        use crate::{lexer, parser::Parser};
+
+        $(
+            #[test]
+            fn $ident() {
+                let input = $input.as_bytes().to_vec();
+                let mut l = lexer::Lexer::new(&input, "parser_test_analysis");
+                let toks = l.run();
+                assert_eq!(l.errors.len(), 0);
+
+                let mut parser = Parser::new(toks, "parser_test_analysis");
+                let ast = parser.parse();
+                assert_eq!(parser.errors.len(), 0);
+
+                let diagnostics = ast
+                    .iter()
+                    .flat_map(|node| node.analyze("parser_test_analysis"))
+                    .collect::<Vec<_>>();
+                assert_eq!(diagnostics.len(), 0);
+            }
+        )*
+        }
+    };
+}
+
 #[cfg(test)]
 mod should_fail {
     test_group_fail! {
@@ -1519,5 +1586,20 @@ mod should_fail {
         // expr invalid construct
         expr_invalid_construct: "ATTACH AS db;" => Rule::Syntax, "is not a valid construct",
         bind_without_identifier: "ATTACH : AS db;" => Rule::Syntax, "requires an identifier as a postfix"
+    }
+}
+
+#[cfg(test)]
+mod should_analyze {
+    test_group_analysis_assert! {
+        diagnostic_tests,
+        create_table_recommends_strict:
+            "CREATE TABLE users (id INTEGER);" => Rule::Quirk, "Add STRICT"
+    }
+
+    test_group_analysis_pass! {
+        negative_diagnostic_tests,
+        create_table_strict_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT;"
     }
 }

@@ -1498,6 +1498,7 @@ mod should_fail {
         create_table_empty_column_list: "CREATE TABLE users ();" => Rule::Syntax, "requires at least one column definition",
         create_table_trailing_comma: "CREATE TABLE users (id INTEGER,);" => Rule::Syntax, "Expected Ident(<name>)",
         create_table_as_select_unimplemented: "CREATE TABLE users AS SELECT id FROM old_users;" => Rule::Unimplemented, "CREATE TABLE ... AS <select_stmt> is not yet supported",
+        create_virtual_table_unimplemented: "CREATE VIRTUAL TABLE docs USING fts5(content);" => Rule::Unimplemented, "CREATE VIRTUAL TABLE is not yet supported",
         create_table_unknown_option: "CREATE TABLE users (id INTEGER) ROWID;" => Rule::Syntax, "expected STRICT or WITHOUT ROWID",
         create_table_without_missing_rowid: "CREATE TABLE users (id INTEGER) WITHOUT;" => Rule::Syntax, "Wanted Keyword(ROWID)",
         create_table_option_trailing_comma: "CREATE TABLE users (id INTEGER) STRICT,;" => Rule::Syntax, "trailing comma",

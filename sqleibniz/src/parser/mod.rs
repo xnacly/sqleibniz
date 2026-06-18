@@ -457,7 +457,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/lang_createtable.html
+    /// Dispatches SQLite `CREATE` statements that sqleibniz currently models.
+    ///
+    /// Supported AST-producing forms are the column-list form of `CREATE TABLE`, column-name
+    /// `CREATE INDEX`, and structurally parsed `CREATE TRIGGER` statements. `CREATE VIEW` is
+    /// recognized so unsupported select bodies can produce a precise diagnostic.
+    ///
+    /// Explicitly unsupported advanced forms are reported as `sqleibniz/unimplemented`:
+    ///
+    /// - `CREATE VIRTUAL TABLE ... USING ...`
+    /// - `CREATE TABLE ... AS <select_stmt>`
+    /// - expression indexes
+    /// - partial indexes
+    /// - `CREATE VIEW ... AS <select_stmt>`
+    ///
+    /// See: https://www.sqlite.org/lang_create.html
     #[cfg_attr(feature = "trace", trace)]
     fn create_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -486,6 +500,18 @@ impl<'a> Parser<'a> {
             Type::Keyword(Keyword::VIEW) if !unique => self.create_view_stmt(),
             Type::Keyword(Keyword::TRIGGER) if !unique => {
                 self.create_trigger_stmt(location, temporary)
+            }
+            Type::Keyword(Keyword::VIRTUAL) if !unique => {
+                let src = Location::from(self.cur());
+                self.push_doc_err(
+                    "Unimplemented",
+                    "CREATE VIRTUAL TABLE is not yet supported",
+                    src,
+                    Rule::Unimplemented,
+                    "https://www.sqlite.org/lang_createvtab.html",
+                );
+                self.skip_until_semicolon_or_eof();
+                None
             }
             _ => {
                 let src = Location::from(self.cur());

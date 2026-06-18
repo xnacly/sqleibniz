@@ -10,104 +10,366 @@ pub fn pragma(file: &str, pragma: &Pragma) -> Vec<Error> {
     PRAGMAS
         .iter()
         .find(|entry| entry.name == name)
-        .and_then(|entry| entry.diagnostic(file, pragma))
+        .and_then(|entry| entry.analyse(file, pragma))
         .into_iter()
         .collect()
 }
 
 struct PragmaEntry {
     name: &'static str,
-    diagnostic: PragmaDiagnostic,
+    analysis: PragmaAnalysis,
 }
 
-enum PragmaDiagnostic {
+enum PragmaAnalysis {
+    None,
     Deprecated {
         msg: &'static str,
         note: &'static str,
     },
-    Check(fn(&str, &Pragma) -> Option<Error>),
+    Check {
+        diagnostic: fn(&str, &Pragma) -> Option<Error>,
+        #[cfg(test)]
+        diagnostic_value: Type,
+    },
 }
 
 impl PragmaEntry {
-    fn diagnostic(&self, file: &str, pragma: &Pragma) -> Option<Error> {
-        match self.diagnostic {
-            PragmaDiagnostic::Deprecated { msg, note } => Some(
+    fn analyse(&self, file: &str, pragma: &Pragma) -> Option<Error> {
+        match self.analysis {
+            PragmaAnalysis::None => None,
+            PragmaAnalysis::Deprecated { msg, note } => Some(
                 Error::new(file, pragma.location, Rule::Quirk, msg, note)
                     .with_doc_url("https://www.sqlite.org/pragma.html"),
             ),
-            PragmaDiagnostic::Check(check) => check(file, pragma),
+            PragmaAnalysis::Check { diagnostic, .. } => diagnostic(file, pragma),
         }
     }
 }
 
 const PRAGMAS: &[PragmaEntry] = &[
     PragmaEntry {
+        name: "analysis_limit",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "application_id",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "auto_vacuum",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "automatic_index",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "busy_timeout",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "cache_size",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "cache_spill",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "case_sensitive_like",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA case_sensitive_like is deprecated",
             note: "SQLite documents case_sensitive_like as deprecated. Avoid new use because changing LIKE semantics can make existing schema objects appear corrupt until the setting is restored or indexes are rebuilt.",
         },
     },
     PragmaEntry {
+        name: "cell_size_check",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "checkpoint_fullfsync",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "collation_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "compile_options",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "count_changes",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA count_changes is deprecated",
             note: "SQLite documents count_changes as deprecated. Avoid new use; sqlite3_changes() and sqlite3_total_changes() are the supported interfaces.",
         },
     },
     PragmaEntry {
         name: "data_store_directory",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA data_store_directory is deprecated",
             note: "SQLite documents data_store_directory as deprecated and not threadsafe. Avoid changing process-global SQLite directory state from SQL.",
         },
     },
     PragmaEntry {
+        name: "data_version",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "database_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "default_cache_size",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA default_cache_size is deprecated",
             note: "SQLite documents default_cache_size as deprecated. Prefer PRAGMA cache_size for connection-local cache tuning.",
         },
     },
     PragmaEntry {
+        name: "defer_foreign_keys",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "empty_result_callbacks",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA empty_result_callbacks is deprecated",
             note: "SQLite documents empty_result_callbacks as deprecated. Avoid new use.",
         },
     },
     PragmaEntry {
+        name: "encoding",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "foreign_key_check",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "foreign_key_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "foreign_keys",
+        analysis: PragmaAnalysis::Check {
+            diagnostic: foreign_keys,
+            #[cfg(test)]
+            diagnostic_value: Type::Boolean(false),
+        },
+    },
+    PragmaEntry {
+        name: "freelist_count",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "full_column_names",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA full_column_names is deprecated",
             note: "SQLite documents full_column_names as deprecated. Avoid relying on deprecated result-column naming controls.",
         },
     },
     PragmaEntry {
+        name: "fullfsync",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "function_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "hard_heap_limit",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "ignore_check_constraints",
+        analysis: PragmaAnalysis::Check {
+            diagnostic: ignore_check_constraints,
+            #[cfg(test)]
+            diagnostic_value: Type::Boolean(true),
+        },
+    },
+    PragmaEntry {
+        name: "incremental_vacuum",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "index_info",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "index_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "index_xinfo",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "integrity_check",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "journal_mode",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "journal_size_limit",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "legacy_alter_table",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "locking_mode",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "max_page_count",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "mmap_size",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "module_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "optimize",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "page_count",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "page_size",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "parser_trace",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "pragma_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "query_only",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "quick_check",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "read_uncommitted",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "recursive_triggers",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "reverse_unordered_selects",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "schema_version",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "secure_delete",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "short_column_names",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA short_column_names is deprecated",
             note: "SQLite documents short_column_names as deprecated. Avoid relying on deprecated result-column naming controls.",
         },
     },
     PragmaEntry {
+        name: "shrink_memory",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "soft_heap_limit",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "synchronous",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "table_info",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "table_list",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "table_xinfo",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "temp_store",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
         name: "temp_store_directory",
-        diagnostic: PragmaDiagnostic::Deprecated {
+        analysis: PragmaAnalysis::Deprecated {
             msg: "PRAGMA temp_store_directory is deprecated",
             note: "SQLite documents temp_store_directory as deprecated and not threadsafe. Avoid changing process-global SQLite directory state from SQL.",
         },
     },
     PragmaEntry {
-        name: "foreign_keys",
-        diagnostic: PragmaDiagnostic::Check(foreign_keys),
+        name: "threads",
+        analysis: PragmaAnalysis::None,
     },
     PragmaEntry {
-        name: "ignore_check_constraints",
-        diagnostic: PragmaDiagnostic::Check(ignore_check_constraints),
+        name: "trusted_schema",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "user_version",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "vdbe_addoptrace",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "vdbe_debug",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "vdbe_listing",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "vdbe_trace",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "wal_autocheckpoint",
+        analysis: PragmaAnalysis::None,
+    },
+    PragmaEntry {
+        name: "wal_checkpoint",
+        analysis: PragmaAnalysis::None,
     },
     PragmaEntry {
         name: "writable_schema",
-        diagnostic: PragmaDiagnostic::Check(writable_schema),
+        analysis: PragmaAnalysis::Check {
+            diagnostic: writable_schema,
+            #[cfg(test)]
+            diagnostic_value: Type::Boolean(true),
+        },
     },
 ];
 
@@ -207,13 +469,58 @@ fn matches_off(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{
-        analyse::pragma::pragma,
+        analyse::pragma::{PRAGMAS, PragmaAnalysis, pragma},
         parser::nodes::{Pragma, PragmaInvocation, SchemaTableContainer},
         types::{Token, Type, rules::Rule},
     };
 
     fn pragma_node(name: &str, invocation: PragmaInvocation) -> Pragma {
         Pragma::new(SchemaTableContainer::Table(name.into()), invocation)
+    }
+
+    fn assignment(name: &str, value: Type) -> Pragma {
+        pragma_node(
+            name,
+            PragmaInvocation::Assign {
+                value: Token::new(value),
+            },
+        )
+    }
+
+    #[test]
+    fn pragma_table_is_sorted_and_unique() {
+        for window in PRAGMAS.windows(2) {
+            assert!(
+                window[0].name < window[1].name,
+                "PRAGMA table entries must be sorted and unique: {:?} came before {:?}",
+                window[0].name,
+                window[1].name
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_table_entries_emit_diagnostics() {
+        for entry in PRAGMAS
+            .iter()
+            .filter(|entry| !matches!(entry.analysis, PragmaAnalysis::None))
+        {
+            let value = match &entry.analysis {
+                PragmaAnalysis::None => unreachable!(),
+                PragmaAnalysis::Deprecated { .. } => Type::Boolean(true),
+                PragmaAnalysis::Check {
+                    diagnostic_value, ..
+                } => diagnostic_value.clone(),
+            };
+            let pragma = assignment(entry.name, value);
+            let diagnostics = entry.analyse("test.sql", &pragma);
+
+            assert!(
+                diagnostics.is_some(),
+                "expected PRAGMA {} to emit a diagnostic",
+                entry.name
+            );
+        }
     }
 
     #[test]
@@ -234,6 +541,16 @@ mod tests {
 
     #[test]
     fn accepts_unknown_pragmas() {
+        let diagnostics = pragma(
+            "test.sql",
+            &pragma_node("some_extension_pragma", PragmaInvocation::Query),
+        );
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_known_pragmas_without_analysis_rules() {
         let diagnostics = pragma(
             "test.sql",
             &pragma_node("application_id", PragmaInvocation::Query),

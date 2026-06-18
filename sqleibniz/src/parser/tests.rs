@@ -1652,7 +1652,7 @@ mod should_analyze {
             "PRAGMA foreign_keys = true;",
         ignore_check_constraints_disabled_has_no_recommendation:
             "PRAGMA ignore_check_constraints = 0;",
-        unknown_pragma_has_no_recommendation:
+        known_pragma_without_analysis_rule_has_no_recommendation:
             "PRAGMA application_id;"
     }
 }

@@ -12,6 +12,7 @@ keywords = ["sql", "lsp", "static-analysis", "parser", "language-server"]
 
 [features]
 trace = ["sqleibniz-proc"]
+trace-analysis = []
 
 [dependencies]
 sqleibniz-proc = { version = "0.0.1", optional = true }

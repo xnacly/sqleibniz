@@ -108,7 +108,15 @@ macro_rules! node {
             }
 
             fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-                node_diagnostics!(file, context, [$(self.$field_name),*] $(, $analyser)?, self)
+                #[cfg(feature = "trace-analysis")]
+                crate::analyse::trace::enter_node();
+
+                let diagnostics = node_diagnostics!(file, context, [$(self.$field_name),*] $(, $analyser)?, self);
+
+                #[cfg(feature = "trace-analysis")]
+                crate::analyse::trace::exit_node(self.name(), self.location(), &diagnostics);
+
+                diagnostics
             }
         }
 

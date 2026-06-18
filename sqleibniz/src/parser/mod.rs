@@ -136,25 +136,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn skip_until_keyword_at_depth_zero(&mut self, keyword: Keyword) {
-        let mut depth = 0;
-        while !self.is_eof() {
-            match self.cur().ttype {
-                Type::BraceLeft => depth += 1,
-                Type::BraceRight if depth > 0 => depth -= 1,
-                Type::Keyword(current) if current == keyword && depth == 0 => break,
-                _ => {}
-            }
-            self.advance();
-        }
-    }
-
-    fn skip_until_trigger_stmt_end(&mut self) {
-        while !self.is_eof() && !self.is(Type::Semicolon) && !self.is_keyword(Keyword::END) {
-            self.advance();
-        }
-    }
-
     /// checks if type of current token is equal to t, otherwise pushs an error, advances either way
     fn consume(&mut self, t: Type) {
         let tt = t.clone();
@@ -249,19 +230,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn is_pragma_value(&self) -> bool {
-        matches!(
+    // <signed-number|name|signed-literal>
+    fn consume_pragma_value(&mut self, invocation_kind: &str) -> Token {
+        // PRAGMA values are intentionally token-level here. Known PRAGMA-specific form and value
+        // validation happens later in the analyser.
+        let is_pragma_value = matches!(
             self.cur().ttype,
             Type::String(_)
                 | Type::Number(_)
                 | Type::Boolean(_)
                 | Type::Ident(_)
                 | Type::Keyword(_)
-        )
-    }
+        );
 
-    fn consume_pragma_value(&mut self, invocation_kind: &str) -> Token {
-        if !self.is_pragma_value() {
+        if !is_pragma_value {
             let cur = self.cur().clone();
             self.push_err(
                 "Bad pragma value",
@@ -358,7 +340,6 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn sql_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         match self.cur().ttype {
-            // TODO: add new statement starts here
             Type::Keyword(Keyword::PRAGMA) => self.pragma_stmt(),
             Type::Keyword(Keyword::ALTER) => self.alter_stmt(),
             Type::Keyword(Keyword::ATTACH) => self.attach_stmt(),
@@ -499,12 +480,17 @@ impl<'a> Parser<'a> {
         }
 
         match self.cur().ttype {
+            // TABLE ...
             Type::Keyword(Keyword::TABLE) if !unique => self.create_table_stmt(location, temporary),
+            // [UNIQUE] INDEX ...
             Type::Keyword(Keyword::INDEX) => self.create_index_stmt(location, temporary, unique),
+            // VIEW ...
             Type::Keyword(Keyword::VIEW) if !unique => self.create_view_stmt(),
+            // TRIGGER ...
             Type::Keyword(Keyword::TRIGGER) if !unique => {
                 self.create_trigger_stmt(location, temporary)
             }
+            // VIRTUAL TABLE ...
             Type::Keyword(Keyword::VIRTUAL) if !unique => {
                 let src = Location::from(self.cur());
                 self.push_doc_err(
@@ -543,8 +529,10 @@ impl<'a> Parser<'a> {
         location: Location,
         temporary: bool,
     ) -> Option<Box<dyn nodes::Node>> {
+        // TABLE
         self.consume_keyword(Keyword::TABLE);
 
+        // IF NOT EXISTS
         let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
             self.consume_keyword(Keyword::NOT);
             self.consume_keyword(Keyword::EXISTS);
@@ -555,6 +543,7 @@ impl<'a> Parser<'a> {
 
         let name = self.schema_table_container(None)?;
 
+        // AS <select-stmt>
         if self.is(Type::Keyword(Keyword::AS)) {
             let src = Location::from(self.cur());
             self.push_err(
@@ -587,8 +576,10 @@ impl<'a> Parser<'a> {
             }
 
             if self.starts_table_constraint() {
+                // <table-constraint>
                 table_constraints.push(self.table_constraint()?);
             } else {
+                // <column-def>
                 columns.push(self.column_def()?);
             }
 
@@ -630,10 +621,12 @@ impl<'a> Parser<'a> {
 
         while !self.is(Type::Semicolon) && !self.is_eof() {
             match self.cur().ttype {
+                // STRICT
                 Type::Keyword(Keyword::STRICT) => {
                     strict = true;
                     self.advance();
                 }
+                // WITHOUT ROWID
                 Type::Keyword(Keyword::WITHOUT) => {
                     without_rowid = true;
                     self.advance();
@@ -698,8 +691,10 @@ impl<'a> Parser<'a> {
             return None;
         }
 
+        // INDEX
         self.consume_keyword(Keyword::INDEX);
 
+        // IF NOT EXISTS
         let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
             self.consume_keyword(Keyword::NOT);
             self.consume_keyword(Keyword::EXISTS);
@@ -755,6 +750,7 @@ impl<'a> Parser<'a> {
 
         self.consume(Type::BraceRight);
 
+        // WHERE <expr>
         if self.consume_if_keyword(Keyword::WHERE) {
             let src = Location::from(self.cur());
             self.push_err(
@@ -781,8 +777,10 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_createview.html
     #[cfg_attr(feature = "trace", trace)]
     fn create_view_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        // VIEW
         self.consume_keyword(Keyword::VIEW);
 
+        // IF NOT EXISTS
         if self.consume_if_keyword(Keyword::IF) {
             self.consume_keyword(Keyword::NOT);
             self.consume_keyword(Keyword::EXISTS);
@@ -791,6 +789,7 @@ impl<'a> Parser<'a> {
         self.schema_table_container(Some("view"))?;
         let mut columns = vec![];
 
+        // (<column-name>, ...)
         if self.is(Type::BraceLeft) {
             self.advance();
             loop {
@@ -837,6 +836,7 @@ impl<'a> Parser<'a> {
 
         self.consume_keyword(Keyword::AS);
 
+        // <select-stmt>
         if self.is_keyword(Keyword::SELECT) {
             let src = Location::from(self.cur());
             self.push_err(
@@ -872,8 +872,10 @@ impl<'a> Parser<'a> {
         location: Location,
         temporary: bool,
     ) -> Option<Box<dyn nodes::Node>> {
+        // TRIGGER
         self.consume_keyword(Keyword::TRIGGER);
 
+        // IF NOT EXISTS
         let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
             self.consume_keyword(Keyword::NOT);
             self.consume_keyword(Keyword::EXISTS);
@@ -915,19 +917,23 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_timing(&mut self) -> Option<Option<nodes::TriggerTiming>> {
         match self.cur().ttype {
+            // BEFORE
             Type::Keyword(Keyword::BEFORE) => {
                 self.advance();
                 Some(Some(nodes::TriggerTiming::Before))
             }
+            // AFTER
             Type::Keyword(Keyword::AFTER) => {
                 self.advance();
                 Some(Some(nodes::TriggerTiming::After))
             }
+            // INSTEAD OF
             Type::Keyword(Keyword::INSTEAD) => {
                 self.advance();
                 self.consume_keyword(Keyword::OF);
                 Some(Some(nodes::TriggerTiming::InsteadOf))
             }
+            // no trigger-time, event starts here
             Type::Keyword(Keyword::DELETE)
             | Type::Keyword(Keyword::INSERT)
             | Type::Keyword(Keyword::UPDATE) => Some(None),
@@ -953,14 +959,17 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_event(&mut self) -> Option<nodes::TriggerEvent> {
         match self.cur().ttype {
+            // DELETE
             Type::Keyword(Keyword::DELETE) => {
                 self.advance();
                 Some(nodes::TriggerEvent::Delete)
             }
+            // INSERT
             Type::Keyword(Keyword::INSERT) => {
                 self.advance();
                 Some(nodes::TriggerEvent::Insert)
             }
+            // UPDATE [OF <column-name>, ...]
             Type::Keyword(Keyword::UPDATE) => {
                 self.advance();
                 let columns = if self.consume_if_keyword(Keyword::OF) {
@@ -1021,10 +1030,12 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_createtrigger.html
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_for_each_row(&mut self) -> bool {
+        // no FOR EACH ROW
         if !self.consume_if_keyword(Keyword::FOR) {
             return false;
         }
 
+        // FOR EACH ROW
         self.consume_keyword(Keyword::EACH);
         self.consume_keyword(Keyword::ROW);
         true
@@ -1033,10 +1044,12 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/lang_createtrigger.html
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_when_clause(&mut self) -> bool {
+        // no WHEN clause
         if !self.consume_if_keyword(Keyword::WHEN) {
             return false;
         }
 
+        // WHEN <expr>
         if self.is_keyword(Keyword::BEGIN) {
             let src = Location::from(self.cur());
             self.push_doc_err(
@@ -1049,7 +1062,20 @@ impl<'a> Parser<'a> {
             return true;
         }
 
-        self.skip_until_keyword_at_depth_zero(Keyword::BEGIN);
+        // The parser currently records that a WHEN clause exists, but does not build an AST for
+        // the expression itself. Advance to the body-opening BEGIN so the rest of the trigger can
+        // still be parsed. Parenthesized expressions may contain BEGIN-like tokens, so only a
+        // depth-zero BEGIN terminates this skip.
+        let mut depth = 0;
+        while !self.is_eof() {
+            match self.cur().ttype {
+                Type::BraceLeft => depth += 1,
+                Type::BraceRight if depth > 0 => depth -= 1,
+                Type::Keyword(Keyword::BEGIN) if depth == 0 => break,
+                _ => {}
+            }
+            self.advance();
+        }
         true
     }
 
@@ -1060,11 +1086,22 @@ impl<'a> Parser<'a> {
 
         while !self.is_eof() && !self.is_keyword(Keyword::END) {
             let Some(stmt) = self.trigger_body_stmt_kind() else {
-                self.skip_until_trigger_stmt_end();
+                // We could not identify a supported trigger body statement kind at the current
+                // token. Skip the unknown statement payload until either its semicolon or the
+                // trigger-level END keyword so the outer CREATE TRIGGER parser can resynchronize.
+                while !self.is_eof() && !self.is(Type::Semicolon) && !self.is_keyword(Keyword::END)
+                {
+                    self.advance();
+                }
                 break;
             };
             body.push(stmt);
-            self.skip_until_trigger_stmt_end();
+            // Trigger body statements are represented by kind only for now; their SELECT/UPDATE/
+            // INSERT/DELETE payloads are not parsed into AST nodes yet. Keep the recognized kind,
+            // then skip the remaining payload until the statement semicolon or trigger-level END.
+            while !self.is_eof() && !self.is(Type::Semicolon) && !self.is_keyword(Keyword::END) {
+                self.advance();
+            }
 
             if self.is(Type::Semicolon) {
                 self.advance();
@@ -1101,9 +1138,13 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_body_stmt_kind(&mut self) -> Option<nodes::TriggerBodyStmt> {
         match self.cur().ttype {
+            // DELETE ...
             Type::Keyword(Keyword::DELETE) => Some(nodes::TriggerBodyStmt::Delete),
+            // INSERT ...
             Type::Keyword(Keyword::INSERT) => Some(nodes::TriggerBodyStmt::Insert),
+            // SELECT ...
             Type::Keyword(Keyword::SELECT) => Some(nodes::TriggerBodyStmt::Select),
+            // UPDATE ...
             Type::Keyword(Keyword::UPDATE) => Some(nodes::TriggerBodyStmt::Update),
             _ => {
                 let src = Location::from(self.cur());
@@ -1138,7 +1179,20 @@ impl<'a> Parser<'a> {
                     src,
                     Rule::Unimplemented,
                 );
-                self.skip_indexed_column();
+
+                // Skip the unsupported indexed-column expression until the next top-level comma
+                // or closing parenthesis, so the surrounding column list can recover cleanly.
+                let mut depth = 0;
+                while !self.is_eof() {
+                    match self.cur().ttype {
+                        Type::BraceLeft => depth += 1,
+                        Type::BraceRight if depth == 0 => break,
+                        Type::BraceRight => depth -= 1,
+                        Type::Comma if depth == 0 => break,
+                        _ => {}
+                    }
+                    self.advance();
+                }
                 return None;
             }
         };
@@ -1161,34 +1215,20 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Skips an unsupported indexed-column expression until the next top-level comma or `)`.
-    fn skip_indexed_column(&mut self) {
-        let mut depth = 0;
-        while !self.is_eof() {
-            match self.cur().ttype {
-                Type::BraceLeft => depth += 1,
-                Type::BraceRight if depth == 0 => break,
-                Type::BraceRight => depth -= 1,
-                Type::Comma if depth == 0 => break,
-                _ => {}
-            }
-            self.advance();
-        }
-    }
-
     /// https://www.sqlite.org/pragma.html
     #[cfg_attr(feature = "trace", trace)]
     fn pragma_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
 
-        // skip PRAGMA
+        // PRAGMA
         self.advance();
 
-        // PRAGMA needs a target name
+        // [schema-name].<pragma-name>
         let Some(schema_and_pragma) = self.schema_table_container(Some("pragma")) else {
             return None;
         };
 
+        // ;EOF
         let pragma = if self.is(Type::Semicolon) {
             Pragma {
                 location,
@@ -1196,6 +1236,7 @@ impl<'a> Parser<'a> {
                 invocation: nodes::PragmaInvocation::Query,
             }
         } else if self.is(Type::Equal) {
+            // = <pragma-value>
             self.advance();
             Pragma {
                 location,
@@ -1205,6 +1246,7 @@ impl<'a> Parser<'a> {
                 },
             }
         } else if self.is(Type::BraceLeft) {
+            // (<pragma-value>)
             self.advance();
             let value = self.consume_pragma_value("call");
             self.consume(Type::BraceRight);
@@ -1252,6 +1294,7 @@ impl<'a> Parser<'a> {
         a.target = self.schema_table_container(None)?;
 
         match self.cur().ttype {
+            // RENAME TO <new-table-name> | RENAME [COLUMN] <old-name> TO <new-name>
             Type::Keyword(Keyword::RENAME) => {
                 self.advance();
                 if self.is(Type::Keyword(Keyword::TO)) {
@@ -1278,6 +1321,7 @@ impl<'a> Parser<'a> {
                     );
                 }
             }
+            // ADD [COLUMN] <column-def>
             Type::Keyword(Keyword::ADD) => {
                 self.advance();
                 if self.is(Type::Keyword(Keyword::COLUMN)) {
@@ -1286,6 +1330,7 @@ impl<'a> Parser<'a> {
 
                 a.add_column = self.column_def();
             }
+            // DROP [COLUMN] <column-name>
             Type::Keyword(Keyword::DROP) => {
                 self.advance();
                 if self.is(Type::Keyword(Keyword::COLUMN)) {
@@ -1414,9 +1459,13 @@ impl<'a> Parser<'a> {
         self.advance();
 
         match self.cur().ttype {
+            // INDEX
             Type::Keyword(Keyword::INDEX) => (),
+            // TABLE
             Type::Keyword(Keyword::TABLE) => (),
+            // TRIGGER
             Type::Keyword(Keyword::TRIGGER) => (),
+            // VIEW
             Type::Keyword(Keyword::VIEW) => (),
             _ => {
                 let mut err = self.err(
@@ -1442,9 +1491,10 @@ impl<'a> Parser<'a> {
             *keyword
         };
 
-        // skip either INDEX;TABLE;TRIGGER or VIEW
+        // INDEX | TABLE | TRIGGER | VIEW
         self.advance();
 
+        // IF EXISTS
         let if_exists = if self.is(Type::Keyword(Keyword::IF)) {
             self.advance();
             self.consume(Type::Keyword(Keyword::EXISTS));
@@ -1516,6 +1566,7 @@ impl<'a> Parser<'a> {
         self.advance();
 
         match self.cur().ttype {
+            // TRANSACTION | TO | ;
             Type::Keyword(Keyword::TRANSACTION) | Type::Keyword(Keyword::TO) | Type::Semicolon => {}
             _ => {
                 let cur = self.cur().clone();
@@ -1534,11 +1585,12 @@ impl<'a> Parser<'a> {
 
         self.consume_if_keyword(Keyword::TRANSACTION);
 
-        // optional TO
+        // TO [SAVEPOINT] <savepoint-name>
         if self.consume_if_keyword(Keyword::TO) {
             self.consume_if_keyword(Keyword::SAVEPOINT);
 
             match self.cur().ttype {
+                // <savepoint-name> | ;
                 Type::Keyword(Keyword::SAVEPOINT) | Type::Ident(_) | Type::Semicolon => {}
                 _ => {
                     let cur = self.cur().clone();
@@ -1590,9 +1642,9 @@ impl<'a> Parser<'a> {
         self.advance();
 
         match self.cur().ttype {
-            // expected end 1
+            // ;
             Type::Semicolon => (),
-            // expected end 2, optional
+            // TRANSACTION
             Type::Keyword(Keyword::TRANSACTION) => self.advance(),
             _ => {
                 let cur = self.cur().clone();
@@ -1633,9 +1685,11 @@ impl<'a> Parser<'a> {
         begin.transaction_kind = self.consume_transaction_kind();
 
         match self.cur().ttype {
+            // ;
             Type::Semicolon => return some_box!(begin),
-            // ending
+            // TRANSACTION
             Type::Keyword(Keyword::TRANSACTION) => self.advance(),
+            // second transaction-kind
             Type::Keyword(Keyword::DEFERRED)
             | Type::Keyword(Keyword::IMMEDIATE)
             | Type::Keyword(Keyword::EXCLUSIVE) => {
@@ -1673,6 +1727,7 @@ impl<'a> Parser<'a> {
 
     fn consume_transaction_kind(&mut self) -> Option<Keyword> {
         match self.cur().ttype {
+            // DEFERRED | IMMEDIATE | EXCLUSIVE
             Type::Keyword(kind @ (Keyword::DEFERRED | Keyword::IMMEDIATE | Keyword::EXCLUSIVE)) => {
                 self.advance();
                 Some(kind)
@@ -1692,6 +1747,7 @@ impl<'a> Parser<'a> {
         self.consume(Type::Keyword(Keyword::VACUUM));
 
         match self.cur().ttype {
+            // ; | <schema-name> | INTO
             Type::Semicolon | Type::Ident(_) | Type::Keyword(Keyword::INTO) => {}
             _ => {
                 let mut err = self.err(
@@ -1712,18 +1768,18 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // first path
+        // ;
         if let Type::Semicolon = self.cur().ttype {
             return some_box!(v);
         }
 
-        // if schema_name is specified
+        // <schema-name>
         if let Type::Ident(_) = self.cur().ttype {
             v.schema_name = Some(self.cur().clone());
             self.advance(); // skip schema_name
         }
 
-        // if INTO keyword is given is specified
+        // INTO <filename>
         if let Type::Keyword(Keyword::INTO) = self.cur().ttype {
             self.advance(); // skip INTO
             if let Type::String(_) = self.cur().ttype {
@@ -1898,6 +1954,7 @@ impl<'a> Parser<'a> {
         target_name: Option<&str>,
     ) -> Option<SchemaTableContainer> {
         match self.cur().ttype.clone() {
+            // TEMP.<table-name>
             Type::Keyword(Keyword::TEMP) if self.next_is(Type::Dot) => {
                 self.advance();
                 self.advance();
@@ -1917,6 +1974,7 @@ impl<'a> Parser<'a> {
                     table,
                 })
             }
+            // <schema-name>.<table-name>
             Type::Ident(schema) if self.next_is(Type::Dot) => {
                 // skip schema_name
                 self.advance();
@@ -1936,6 +1994,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(SchemaTableContainer::SchemaAndTable { schema, table })
             }
+            // <table-name>
             Type::Ident(table_name) | Type::String(table_name) => {
                 // skip table_name
                 self.advance();
@@ -2041,6 +2100,7 @@ impl<'a> Parser<'a> {
     #[cfg_attr(feature = "trace", trace)]
     fn foreign_key_clause_on_and_match(&mut self, fk: &mut ForeignKeyClause) {
         loop {
+            // ON DELETE|UPDATE <foreign-key-action>
             if self.consume_if_keyword(Keyword::ON) {
                 let is_delete = match &self.cur().ttype {
                     Type::Keyword(Keyword::DELETE) => true,
@@ -2069,6 +2129,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            // MATCH FULL|PARTIAL|SIMPLE
             if self.consume_if_keyword(Keyword::MATCH) {
                 fk.match_type = match self.cur().ttype {
                     Type::Keyword(Keyword::FULL) => Some(ForeignKeyMatch::Full),
@@ -2099,19 +2160,23 @@ impl<'a> Parser<'a> {
 
     fn foreign_key_action(&mut self) -> Option<ForeignKeyAction> {
         match self.cur().ttype {
+            // CASCADE
             Type::Keyword(Keyword::CASCADE) => {
                 self.advance();
                 Some(ForeignKeyAction::Cascade)
             }
+            // RESTRICT
             Type::Keyword(Keyword::RESTRICT) => {
                 self.advance();
                 Some(ForeignKeyAction::Restrict)
             }
+            // NO ACTION
             Type::Keyword(Keyword::NO) => {
                 self.advance();
                 self.consume_keyword(Keyword::ACTION);
                 Some(ForeignKeyAction::NoAction)
             }
+            // SET NULL | SET DEFAULT
             Type::Keyword(Keyword::SET) => {
                 self.advance();
                 if self.consume_if_keyword(Keyword::NULL) {
@@ -2192,6 +2257,7 @@ impl<'a> Parser<'a> {
 
         self.foreign_key_clause_on_and_match(&mut fk);
 
+        // [NOT] DEFERRABLE [INITIALLY DEFERRED|IMMEDIATE]
         if self.is_keyword(Keyword::NOT) || self.is_keyword(Keyword::DEFERRABLE) {
             fk.deferrable = true;
             if self.is_keyword(Keyword::NOT) {
@@ -2317,6 +2383,7 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/table-constraint.html
     #[cfg_attr(feature = "trace", trace)]
     fn table_constraint(&mut self) -> Option<nodes::TableConstraint> {
+        // CONSTRAINT <name>
         if self.consume_if_keyword(Keyword::CONSTRAINT) {
             self.consume_ident(
                 "https://www.sqlite.org/syntax/table-constraint.html",
@@ -2324,6 +2391,7 @@ impl<'a> Parser<'a> {
             )?;
         }
 
+        // PRIMARY KEY (<indexed-column>, ...) [ON CONFLICT <conflict-algorithm>]
         if self.is_keyword(Keyword::PRIMARY) {
             self.advance();
             self.consume_keyword(Keyword::KEY);
@@ -2334,6 +2402,7 @@ impl<'a> Parser<'a> {
                 columns,
                 on_conflict: self.conflict_clause(),
             })
+        // UNIQUE (<indexed-column>, ...) [ON CONFLICT <conflict-algorithm>]
         } else if self.is_keyword(Keyword::UNIQUE) {
             self.advance();
             self.consume(Type::BraceLeft);
@@ -2343,12 +2412,14 @@ impl<'a> Parser<'a> {
                 columns,
                 on_conflict: self.conflict_clause(),
             })
+        // CHECK (<expr>)
         } else if self.is_keyword(Keyword::CHECK) {
             self.advance();
             self.consume(Type::BraceLeft);
             let expr = self.expr()?;
             self.consume(Type::BraceRight);
             Some(nodes::TableConstraint::Check(expr))
+        // FOREIGN KEY (<column-name>, ...) <foreign-key-clause>
         } else if self.is_keyword(Keyword::FOREIGN) {
             self.advance();
             self.consume_keyword(Keyword::KEY);
@@ -2461,6 +2532,7 @@ impl<'a> Parser<'a> {
     }
 
     fn column_constraint(&mut self) -> Option<ColumnConstraint> {
+        // CONSTRAINT <name>
         if self.is_keyword(Keyword::CONSTRAINT) {
             self.advance();
             self.consume_ident(
@@ -2469,35 +2541,43 @@ impl<'a> Parser<'a> {
             );
         }
 
+        // PRIMARY KEY [ASC|DESC] [ON CONFLICT <conflict-algorithm>] [AUTOINCREMENT]
         if self.is_keyword(Keyword::PRIMARY) {
             self.primary_key_column_constraint()
+        // NOT NULL [ON CONFLICT <conflict-algorithm>]
         } else if self.is_keyword(Keyword::NOT) {
             self.advance();
             self.consume_keyword(Keyword::NULL);
             Some(ColumnConstraint::NotNull {
                 on_conflict: self.conflict_clause(),
             })
+        // UNIQUE [ON CONFLICT <conflict-algorithm>]
         } else if self.is_keyword(Keyword::UNIQUE) {
             self.advance();
             Some(ColumnConstraint::Unique {
                 on_conflict: self.conflict_clause(),
             })
+        // CHECK (<expr>)
         } else if self.is_keyword(Keyword::CHECK) {
             self.advance();
             self.consume(Type::BraceLeft);
             let e = self.expr()?;
             self.consume(Type::BraceRight);
             Some(ColumnConstraint::Check(e))
+        // DEFAULT <literal-value> | DEFAULT (<expr>)
         } else if self.is_keyword(Keyword::DEFAULT) {
             self.default_column_constraint()
+        // COLLATE <collation-name>
         } else if self.is_keyword(Keyword::COLLATE) {
             self.advance();
             Some(ColumnConstraint::Collate(self.consume_ident(
                 "https://www.sqlite.org/syntax/column-constraint.html",
                 "collation_name",
             )?))
+        // <foreign-key-clause>
         } else if self.is_keyword(Keyword::REFERENCES) {
             Some(ColumnConstraint::ForeignKey(self.foreign_key_clause()?))
+        // [GENERATED ALWAYS] AS (<expr>) [STORED|VIRTUAL]
         } else if self.is_keyword(Keyword::GENERATED) || self.is_keyword(Keyword::AS) {
             self.generated_column_constraint()
         } else {

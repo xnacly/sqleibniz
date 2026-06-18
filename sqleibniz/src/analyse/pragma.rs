@@ -97,24 +97,44 @@ impl PragmaForms {
 enum PragmaValue {
     /// Query-only pragmas. Assignment/call forms using this value spec should be rejected by
     /// `PragmaForms` before value validation runs.
+    ///
+    /// Example: `PRAGMA database_list;` has no value.
     None,
     /// SQLite boolean values: `0`, `1`, `on`, `off`, `yes`, `no`, `true`, `false`.
+    ///
+    /// Example: `PRAGMA foreign_keys = ON;` or `PRAGMA trusted_schema = false;`.
     Boolean,
     /// Numeric literals with no fractional component.
+    ///
+    /// Example: `PRAGMA cache_size = 2000;`.
     Integer,
     /// Table/index/schema-like names represented by identifiers, strings, or SQLite keywords.
+    ///
+    /// Example: `PRAGMA table_info(users);` or `PRAGMA index_info('idx_users_email');`.
     Name,
     /// Text-like values represented by string literals or identifiers.
+    ///
+    /// Example: `PRAGMA encoding = 'UTF-8';`.
     Text,
     /// Boolean values or integer numeric literals.
+    ///
+    /// Example: `PRAGMA cache_spill = OFF;` or `PRAGMA cache_spill = 1000;`.
     BooleanOrInteger,
     /// Boolean values or one of a fixed set of documented named options.
+    ///
+    /// Example: `PRAGMA secure_delete = true;` or `PRAGMA secure_delete = FAST;`.
     BooleanOrNamed(&'static [&'static str]),
     /// Integer numeric literals or one of a fixed set of documented named options.
+    ///
+    /// Example: `PRAGMA synchronous = 2;` or `PRAGMA synchronous = NORMAL;`.
     IntegerOrNamed(&'static [&'static str]),
     /// Integer numeric literals or table/index/schema-like names.
+    ///
+    /// Example: `PRAGMA integrity_check(10);` or `PRAGMA integrity_check(users);`.
     IntegerOrName,
     /// One of a fixed set of documented named options.
+    ///
+    /// Example: `PRAGMA wal_checkpoint(TRUNCATE);`.
     Named(&'static [&'static str]),
 }
 
@@ -122,15 +142,19 @@ impl PragmaValue {
     fn accepts(self, token: &Token) -> bool {
         match self {
             Self::None => false,
-            Self::Boolean => is_boolean(token),
-            Self::Integer => is_integer(token),
-            Self::Name => is_name(token),
-            Self::Text => matches!(token.ttype, Type::String(_)) || is_name(token),
-            Self::BooleanOrInteger => is_boolean(token) || is_integer(token),
-            Self::BooleanOrNamed(options) => is_boolean(token) || is_named(token, options),
-            Self::IntegerOrNamed(options) => is_integer(token) || is_named(token, options),
-            Self::IntegerOrName => is_integer(token) || is_name(token),
-            Self::Named(options) => is_named(token, options),
+            Self::Boolean => token.is_pragma_boolean(),
+            Self::Integer => is_integer_literal(token),
+            Self::Name => is_name_token(token),
+            Self::Text => is_name_token(token),
+            Self::BooleanOrInteger => token.is_pragma_boolean() || is_integer_literal(token),
+            Self::BooleanOrNamed(options) => {
+                token.is_pragma_boolean() || is_named_option(token, options)
+            }
+            Self::IntegerOrNamed(options) => {
+                is_integer_literal(token) || is_named_option(token, options)
+            }
+            Self::IntegerOrName => is_integer_literal(token) || is_name_token(token),
+            Self::Named(options) => is_named_option(token, options),
         }
     }
 
@@ -308,14 +332,6 @@ macro_rules! pragma_entry {
     };
 }
 
-const AUTO_VACUUM_MODES: &[&str] = &["0", "1", "2", "full", "incremental", "none"];
-const JOURNAL_MODES: &[&str] = &["delete", "memory", "off", "persist", "truncate", "wal"];
-const LOCKING_MODES: &[&str] = &["exclusive", "normal"];
-const SECURE_DELETE_MODES: &[&str] = &["fast"];
-const SYNCHRONOUS_MODES: &[&str] = &["extra", "full", "normal", "off"];
-const TEMP_STORE_MODES: &[&str] = &["default", "file", "memory"];
-const WAL_CHECKPOINT_MODES: &[&str] = &["full", "passive", "restart", "truncate"];
-
 const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "analysis_limit",
@@ -330,7 +346,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "auto_vacuum",
         forms!(query, assign),
-        PragmaValue::IntegerOrNamed(AUTO_VACUUM_MODES)
+        PragmaValue::IntegerOrNamed(&["0", "1", "2", "full", "incremental", "none"])
     ),
     pragma_entry!(
         "automatic_index",
@@ -456,7 +472,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "journal_mode",
         forms!(query, assign),
-        PragmaValue::Named(JOURNAL_MODES)
+        PragmaValue::Named(&["delete", "memory", "off", "persist", "truncate", "wal"])
     ),
     pragma_entry!(
         "journal_size_limit",
@@ -471,7 +487,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "locking_mode",
         forms!(query, assign),
-        PragmaValue::Named(LOCKING_MODES)
+        PragmaValue::Named(&["exclusive", "normal"])
     ),
     pragma_entry!(
         "max_page_count",
@@ -514,7 +530,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "secure_delete",
         forms!(query, assign),
-        PragmaValue::BooleanOrNamed(SECURE_DELETE_MODES)
+        PragmaValue::BooleanOrNamed(&["fast"])
     ),
     pragma_entry!(
         "short_column_names",
@@ -534,7 +550,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "synchronous",
         forms!(query, assign),
-        PragmaValue::IntegerOrNamed(SYNCHRONOUS_MODES)
+        PragmaValue::IntegerOrNamed(&["extra", "full", "normal", "off"])
     ),
     pragma_entry!("table_info", forms!(call), PragmaValue::Name),
     pragma_entry!("table_list", forms!(query, call), PragmaValue::Name),
@@ -542,7 +558,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "temp_store",
         forms!(query, assign),
-        PragmaValue::IntegerOrNamed(TEMP_STORE_MODES)
+        PragmaValue::IntegerOrNamed(&["default", "file", "memory"])
     ),
     pragma_entry!(
         "temp_store_directory",
@@ -576,7 +592,7 @@ const PRAGMAS: &[PragmaEntry] = &[
     pragma_entry!(
         "wal_checkpoint",
         forms!(query, call),
-        PragmaValue::Named(WAL_CHECKPOINT_MODES)
+        PragmaValue::Named(&["full", "passive", "restart", "truncate"])
     ),
     pragma_entry!(
         "writable_schema",
@@ -587,7 +603,7 @@ const PRAGMAS: &[PragmaEntry] = &[
 ];
 
 fn foreign_keys(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
-    if !assigned_or_called_with(pragma, |token| token.pragma_boolean() == Some(false)) {
+    if !invocation_value_matches(pragma, |token| token.pragma_boolean() == Some(false)) {
         return None;
     }
 
@@ -604,7 +620,7 @@ fn foreign_keys(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Er
 }
 
 fn ignore_check_constraints(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
-    if !assigned_or_called_with(pragma, |token| token.pragma_boolean() == Some(true)) {
+    if !invocation_value_matches(pragma, |token| token.pragma_boolean() == Some(true)) {
         return None;
     }
 
@@ -621,7 +637,7 @@ fn ignore_check_constraints(file: &str, doc_url: &'static str, pragma: &Pragma) 
 }
 
 fn writable_schema(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
-    if !assigned_or_called_with(pragma, |token| token.pragma_boolean() == Some(true)) {
+    if !invocation_value_matches(pragma, |token| token.pragma_boolean() == Some(true)) {
         return None;
     }
 
@@ -645,31 +661,22 @@ fn pragma_name(pragma: &Pragma) -> String {
     }
 }
 
-fn assigned_or_called_with(pragma: &Pragma, predicate: fn(&Token) -> bool) -> bool {
-    match &pragma.invocation {
-        PragmaInvocation::Assign { value } | PragmaInvocation::Call { value } => predicate(value),
-        PragmaInvocation::Query => false,
-    }
-}
-
-fn is_boolean(token: &Token) -> bool {
-    token.is_pragma_boolean()
-}
-
-fn is_integer(token: &Token) -> bool {
+fn is_integer_literal(token: &Token) -> bool {
     matches!(token.ttype, Type::Number(number) if number.fract() == 0.0)
 }
 
-fn is_name(token: &Token) -> bool {
+fn is_name_token(token: &Token) -> bool {
     matches!(
         token.ttype,
         Type::Ident(_) | Type::String(_) | Type::Keyword(_)
     )
 }
 
-fn is_named(token: &Token, options: &[&str]) -> bool {
-    let Some(value) = token_text(token) else {
-        return false;
+fn is_named_option(token: &Token, options: &[&str]) -> bool {
+    let value = match &token.ttype {
+        Type::Ident(value) | Type::String(value) => value.as_str(),
+        Type::Keyword(keyword) => (*keyword).into(),
+        _ => return false,
     };
 
     options
@@ -677,12 +684,13 @@ fn is_named(token: &Token, options: &[&str]) -> bool {
         .any(|option| option.eq_ignore_ascii_case(value))
 }
 
-fn token_text(token: &Token) -> Option<&str> {
-    match &token.ttype {
-        Type::Ident(value) | Type::String(value) => Some(value.as_str()),
-        Type::Keyword(keyword) => Some((*keyword).into()),
-        _ => None,
-    }
+fn invocation_value_matches(pragma: &Pragma, predicate: impl FnOnce(&Token) -> bool) -> bool {
+    let value = match &pragma.invocation {
+        PragmaInvocation::Assign { value } | PragmaInvocation::Call { value } => value,
+        PragmaInvocation::Query => return false,
+    };
+
+    predicate(value)
 }
 
 #[cfg(test)]

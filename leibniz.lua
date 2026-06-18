@@ -2,11 +2,11 @@
 leibniz = {
     disabled_rules = {
         -- Ignore project-level diagnostics by default.
-        "file/no-content",            -- source file is empty
-        "file/no-statements",         -- source file contains no statements
-        "sqleibniz/unimplemented",    -- construct is not implemented yet
-        "sqleibniz/bad-instruction",  -- source file contains a bad sqleibniz instruction
-        "sqleibniz/hook",             -- a user-defined Lua hook reported a diagnostic
+        "file/no-content",           -- source file is empty
+        "file/no-statements",        -- source file contains no statements
+        "sqleibniz/unimplemented",   -- construct is not implemented yet
+        "sqleibniz/bad-instruction", -- source file contains a bad sqleibniz instruction
+        -- "sqleibniz/hook",             -- a user-defined Lua hook reported a diagnostic
 
         -- Uncomment sqlite diagnostics to ignore them.
         -- "sqlite/unsupported", -- Source file uses sql features sqlite does not support
@@ -33,10 +33,10 @@ leibniz = {
             end
         },
         {
-            name = "idents shouldn't be longer than 12 characters",
+            name = "idents shouldn't be longer than 52 characters",
             match = { node = "Token", kind = "Ident" },
             hook = function(node)
-                local max_size = 12
+                local max_size = 52
                 if string.len(node.content) >= max_size then
                     sqleibniz.diagnostic(
                         node,

@@ -19,7 +19,7 @@ macro_rules! field_hook_contexts {
 }
 
 macro_rules! node {
-    ($node_name:ident,$documentation:literal,$($field_name:ident:$field_type:ty),* $(; analyze($this:ident, $file:ident) $body:block)?) => {
+    ($node_name:ident,$documentation:literal,$($field_name:ident:$field_type:ty),* $(; analyse($analyser:path))?) => {
         #[derive(Debug)]
         #[doc = $documentation]
         pub struct $node_name {
@@ -78,10 +78,8 @@ macro_rules! node {
             }
 
             $(
-                fn analyze(&self, file: &str) -> Vec<Error> {
-                    let $this = self;
-                    let $file = file;
-                    $body
+                fn analyse(&self, file: &str) -> Vec<Error> {
+                    $analyser(file, self)
                 }
             )?
         }
@@ -122,7 +120,7 @@ pub trait Node: std::fmt::Debug {
     /// returns the documentation url for sefl
     fn doc(&self) -> &str;
     /// returns diagnostics found by analysing this node after parsing
-    fn analyze(&self, file: &str) -> Vec<Error> {
+    fn analyse(&self, file: &str) -> Vec<Error> {
         let _ = file;
         Vec::new()
     }
@@ -457,6 +455,7 @@ ALTER TABLE schema.table_name DROP COLUMN column_name;
     new_column_name: Option<String>,
     add_column: Option<ColumnDef>,
     drop_column: Option<String>
+    ; analyse(crate::analyse::create::alter)
 );
 
 #[derive(Debug, serde::Serialize)]
@@ -550,6 +549,7 @@ node!(
     // equivalent to type_name: https://www.sqlite.org/syntax/type-name.html
     type_name: Option<SqliteStorageClass>,
     constraints: Vec<ColumnConstraint>
+    ; analyse(crate::analyse::column::column_def)
 );
 
 node!(
@@ -572,20 +572,7 @@ CREATE TABLE table_name (column_def, ...) STRICT;
     table_constraints: Vec<TableConstraint>,
     strict: bool,
     without_rowid: bool
-    ; analyze(table, file) {
-        if table.strict {
-            return Vec::new();
-        }
-
-        vec![crate::error::Error::new(
-            file,
-            table.location,
-            crate::types::rules::Rule::Quirk,
-            "Consider using a STRICT table",
-            "SQLite tables use flexible typing by default. Add STRICT after the column list to enforce declared column types.",
-        )
-        .with_doc_url("https://www.sqlite.org/stricttables.html")]
-    }
+    ; analyse(crate::analyse::create::create_table)
 );
 
 #[derive(Debug, serde::Serialize)]

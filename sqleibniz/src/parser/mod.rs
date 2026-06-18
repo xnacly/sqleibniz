@@ -2228,7 +2228,6 @@ impl<'a> Parser<'a> {
 
     fn parse_column_type(&mut self, def: &mut nodes::ColumnDef) {
         let Type::Ident(name) = self.cur().ttype.clone() else {
-            self.push_missing_column_type_warning();
             return;
         };
 
@@ -2252,23 +2251,6 @@ impl<'a> Parser<'a> {
         if self.is(Type::BraceLeft) {
             self.parse_type_name_parameters();
         }
-    }
-
-    fn push_missing_column_type_warning(&mut self) {
-        let tok = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
-            .unwrap_or_else(|| self.cur());
-
-        let err = Error::new(
-            self.name,
-            tok,
-            Rule::Quirk,
-            "Possibly unintended flexible typed column",
-            "SQLite allows columns without a declared type. Such columns use dynamic typing and type affinity is not enforced. Consider adding TEXT, BLOB, REAL, or INTEGER if this is unintended.",
-        )
-        .with_doc_url("https://www.sqlite.org/quirks.html#the_datatype_is_optional");
-        self.errors.push(err);
     }
 
     fn parse_type_name_parameters(&mut self) {

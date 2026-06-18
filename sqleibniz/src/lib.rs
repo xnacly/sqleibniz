@@ -1,3 +1,5 @@
+/// analyse contains AST-driven diagnostics that run after parsing
+pub mod analyse;
 /// error does formatting and highlighting for errors
 pub mod error;
 /// highlight implements logic for highlighting tokens found in a string

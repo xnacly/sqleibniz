@@ -41,6 +41,10 @@ struct Cli {
     #[clap(value_enum)]
     disable: Option<Vec<Rule>>,
 
+    /// skip AST analysis diagnostics after parsing
+    #[arg(long)]
+    no_analyse: bool,
+
     /// dump the abstract syntax tree as pretty printed json
     #[arg(long, conflicts_with = "sarif")]
     ast_json: bool,
@@ -195,12 +199,14 @@ fn main() {
             }
 
             errors.append(&mut parser.errors);
-            errors.append(
-                &mut ast
-                    .iter()
-                    .flat_map(|node| node.analyze(&file.name))
-                    .collect::<Vec<_>>(),
-            );
+            if !args.no_analyse {
+                errors.append(
+                    &mut ast
+                        .iter()
+                        .flat_map(|node| node.analyse(&file.name))
+                        .collect::<Vec<_>>(),
+                );
+            }
 
             if let Some(hooks) = config.hooks.as_deref() {
                 errors.append(&mut sqleibniz::hooks::run(

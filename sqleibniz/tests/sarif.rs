@@ -120,6 +120,23 @@ fn sarif_omits_disabled_rules() {
 }
 
 #[test]
+fn no_analyse_skips_ast_analysis_diagnostics() {
+    let file = temp_sql("no-analyse", "CREATE TABLE users (id INTEGER);");
+
+    let output = sqleibniz(&[
+        arg("--sarif"),
+        arg("--ignore-config"),
+        arg("--no-analyse"),
+        file_arg(&file),
+    ]);
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["runs"][0]["results"].as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn sarif_conflicts_with_human_and_ast_modes() {
     for flag in ["--silent", "--kiss", "--ast", "--ast-json", "--lsp"] {
         let output = sqleibniz(&[arg("--sarif"), arg(flag)]);

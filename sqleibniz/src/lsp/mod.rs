@@ -104,7 +104,7 @@ fn analyze_document(
     errors.append(
         &mut ast
             .iter()
-            .flat_map(|node| node.analyze(name))
+            .flat_map(|node| node.analyse(name))
             .collect::<Vec<_>>(),
     );
     if let (Some(hooks), Some(lua)) = (hooks, lua) {
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn node_analysis_runs_in_lsp_diagnostics() {
+    fn node_analyse_runs_in_lsp_diagnostics() {
         let state = analyze_document(b"CREATE TABLE users (id INTEGER);", "test.sql", None, None);
 
         assert!(

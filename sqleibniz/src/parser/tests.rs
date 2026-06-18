@@ -234,6 +234,18 @@ mod should_pass {
             false,
         )],
 
+        create_table_column_without_type:
+        r"CREATE TABLE users (name);"=
+        vec![CreateTable::new(
+            false,
+            false,
+            SchemaTableContainer::Table("users".into()),
+            vec![ColumnDef::new("name".into(), None, vec![])],
+            vec![],
+            false,
+            false,
+        )],
+
         create_temp_table_if_not_exists:
         r"CREATE TEMP TABLE IF NOT EXISTS main.users (id INTEGER PRIMARY KEY, name TEXT);"=
         vec![CreateTable::new(
@@ -714,6 +726,16 @@ mod should_pass {
                 None,
                 None,
                 Some(ColumnDef::new("column_name".into(), Some(SqliteStorageClass::Text), vec![])),
+                None,
+            ),
+        ],
+        alter_add_column_without_type: r"ALTER TABLE schema.table_name ADD COLUMN column_name;"=vec![
+            Alter::new(
+                SchemaTableContainer::SchemaAndTable { schema: "schema".into(), table: "table_name".into() },
+                None,
+                None,
+                None,
+                Some(ColumnDef::new("column_name".into(), None, vec![])),
                 None,
             ),
         ],
@@ -1413,17 +1435,16 @@ macro_rules! test_group_analysis_assert {
 
                 let diagnostics = ast
                     .iter()
-                    .flat_map(|node| node.analyze("parser_test_analysis"))
+                    .flat_map(|node| node.analyse("parser_test_analysis"))
                     .collect::<Vec<_>>();
-                assert_eq!(diagnostics.len(), 1);
-
-                let error = &diagnostics[0];
-                assert_eq!(error.rule, $rule);
                 assert!(
-                    error.note.contains($note),
-                    "expected note to contain {:?}, got {:?}",
+                    diagnostics
+                        .iter()
+                        .any(|error| error.rule == $rule && error.note.contains($note)),
+                    "expected a {:?} diagnostic with note containing {:?}, got {:?}",
+                    $rule,
                     $note,
-                    error.note
+                    diagnostics
                 );
             }
         )*
@@ -1451,7 +1472,7 @@ macro_rules! test_group_analysis_pass {
 
                 let diagnostics = ast
                     .iter()
-                    .flat_map(|node| node.analyze("parser_test_analysis"))
+                    .flat_map(|node| node.analyse("parser_test_analysis"))
                     .collect::<Vec<_>>();
                 assert_eq!(diagnostics.len(), 0);
             }
@@ -1576,7 +1597,6 @@ mod should_fail {
 
         // column type / type-name parameters
         non_canonical_type: "CREATE TABLE t (a NUMERIC);" => Rule::Quirk, "Consider using a canonical sqlite type",
-        missing_column_type: "CREATE TABLE t (a);" => Rule::Quirk, "SQLite allows columns without a declared type",
         type_param_non_number: "ALTER TABLE schema.t ADD COLUMN c INTEGER(z);" => Rule::Syntax, "Wanted a Number after Type::BraceLeft",
         type_param_second_non_number: "ALTER TABLE schema.t ADD COLUMN c INTEGER(10, z);" => Rule::Syntax, "Wanted a Number after Type::BraceLeft, Type::Number and Type::Comma",
 
@@ -1595,7 +1615,13 @@ mod should_analyze {
     test_group_analysis_assert! {
         diagnostic_tests,
         create_table_recommends_strict:
-            "CREATE TABLE users (id INTEGER);" => Rule::Quirk, "Add STRICT"
+            "CREATE TABLE users (id INTEGER);" => Rule::Quirk, "Add STRICT",
+        create_table_column_missing_type:
+            "CREATE TABLE users (name);" => Rule::Quirk, "SQLite allows columns without a declared type",
+        alter_add_column_missing_type:
+            "ALTER TABLE users ADD COLUMN name;" => Rule::Quirk, "SQLite allows columns without a declared type",
+        nullable_column_primary_key:
+            "CREATE TABLE users (email TEXT PRIMARY KEY);" => Rule::Quirk, "PRIMARY KEY columns"
     }
 
     test_group_analysis_pass! {

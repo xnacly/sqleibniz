@@ -35,8 +35,9 @@ struct Cli {
     #[arg(short = 'k', long, conflicts_with = "sarif")]
     kiss: bool,
 
-    /// disable diagnostics by their rules, all are enabled by default - this may change in the
-    /// future
+    /// disable diagnostics by their rules, all are enabled by default
+    ///
+    /// Defaults may change in the future
     #[arg(short = 'D')]
     #[clap(value_enum)]
     disable: Option<Vec<Rule>>,
@@ -69,7 +70,19 @@ struct FileResult {
     name: String,
     errors: usize,
     ignored_errors: usize,
+    ignored_rules: Vec<(Rule, usize)>,
     diagnostics: Vec<Error>,
+}
+
+fn record_ignored_rule(ignored_rules: &mut Vec<(Rule, usize)>, rule: Rule) {
+    if let Some((_, count)) = ignored_rules
+        .iter_mut()
+        .find(|(ignored_rule, _)| *ignored_rule == rule)
+    {
+        *count += 1;
+    } else {
+        ignored_rules.push((rule, 1));
+    }
 }
 
 fn main() {
@@ -140,6 +153,7 @@ fn main() {
             name,
             errors: 0,
             ignored_errors: 0,
+            ignored_rules: vec![],
             diagnostics: vec![],
         })
         .collect::<Vec<FileResult>>();
@@ -165,6 +179,7 @@ fn main() {
             }
         };
         let mut ignored_errors = 0;
+        let mut ignored_rules = Vec::new();
         let mut lexer = Lexer::new(&content, file.name.as_str());
         let toks = lexer.run();
         errors.append(&mut lexer.errors);
@@ -220,6 +235,7 @@ fn main() {
             .filter(|e| {
                 if config.disabled_rules.contains(&e.rule) {
                     ignored_errors += 1;
+                    record_ignored_rule(&mut ignored_rules, e.rule);
                     false
                 } else {
                     true
@@ -259,6 +275,7 @@ fn main() {
 
         file.errors = processed_errors.len();
         file.ignored_errors = ignored_errors;
+        file.ignored_rules = ignored_rules;
         file.diagnostics = processed_errors;
     }
     #[cfg(feature = "trace")]
@@ -315,7 +332,7 @@ fn main() {
         error_string_builder.write_char('\n');
         error::print_str_colored(
             &mut error_string_builder,
-            &format!("    {} Error(s) detected\n", file.errors),
+            &format!("    {} Diagnostic(s) detected\n", file.errors),
             match file.errors {
                 0 => error::Color::Green,
                 _ => error::Color::Red,
@@ -323,12 +340,18 @@ fn main() {
         );
         error::print_str_colored(
             &mut error_string_builder,
-            &format!("    {} Error(s) ignored\n", file.ignored_errors),
+            &format!("    {} Diagnostic(s) ignored\n", file.ignored_errors),
             match file.ignored_errors {
                 0 => error::Color::Green,
                 _ => error::Color::Yellow,
             },
-        )
+        );
+
+        for (rule, count) in &file.ignored_rules {
+            error::print_str_colored(&mut error_string_builder, "      -> ", error::Color::Blue);
+            error_string_builder.write_str(rule.name());
+            error_string_builder.write_string(format!(" {count}x\n"));
+        }
     }
     error_string_builder.write_char('\n');
     print_str_colored(&mut error_string_builder, "=>", error::Color::Blue);

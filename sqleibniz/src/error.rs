@@ -125,10 +125,8 @@ impl Error {
     }
 
     pub fn print(&mut self, b: &mut builder::Builder, content: &[u8], tokens: &[Token]) {
-        print_str_colored(b, "error", Color::Red);
-        b.write_char('[');
         print_str_colored(b, self.rule.name(), Color::Red);
-        b.write_str("]: ");
+        b.write_str(": ");
         b.write_str(&self.msg);
         b.write_char('\n');
 

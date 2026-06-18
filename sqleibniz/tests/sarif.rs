@@ -120,6 +120,24 @@ fn sarif_omits_disabled_rules() {
 }
 
 #[test]
+fn human_summary_groups_ignored_diagnostics_by_rule() {
+    let file = temp_sql("ignored-summary", "SELECT;\nSELECT;");
+
+    let output = sqleibniz(&[
+        arg("--ignore-config"),
+        arg("-D"),
+        arg("sqleibniz/unimplemented"),
+        file_arg(&file),
+    ]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("0 Diagnostic(s) detected"));
+    assert!(stdout.contains("2 Diagnostic(s) ignored"));
+    assert!(stdout.contains("sqleibniz/unimplemented 2x"));
+}
+
+#[test]
 fn no_analyse_skips_ast_analysis_diagnostics() {
     let file = temp_sql("no-analyse", "CREATE TABLE users (id INTEGER);");
 

@@ -542,17 +542,14 @@ impl<'a> Parser<'a> {
 
     /// Dispatches SQLite `CREATE` statements that sqleibniz currently models.
     ///
-    /// Supported AST-producing forms are the column-list form of `CREATE TABLE`, column-name
-    /// `CREATE INDEX`, and structurally parsed `CREATE TRIGGER` statements. `CREATE VIEW` is
-    /// recognized so unsupported select bodies can produce a precise diagnostic.
+    /// Supported AST-producing forms are `CREATE TABLE`, `CREATE TABLE AS`, `CREATE INDEX`,
+    /// `CREATE VIEW`, and structurally parsed `CREATE TRIGGER` statements.
     ///
     /// Explicitly unsupported advanced forms are reported as `sqleibniz/unimplemented`:
     ///
     /// - `CREATE VIRTUAL TABLE ... USING ...`
-    /// - `CREATE TABLE ... AS <select_stmt>`
     /// - expression indexes
     /// - partial indexes
-    /// - `CREATE VIEW ... AS <select_stmt>`
     ///
     /// See: https://www.sqlite.org/lang_create.html
     #[cfg_attr(feature = "trace", trace)]
@@ -583,7 +580,7 @@ impl<'a> Parser<'a> {
             // [UNIQUE] INDEX ...
             Type::Keyword(Keyword::INDEX) => self.create_index_stmt(location, temporary, unique),
             // VIEW ...
-            Type::Keyword(Keyword::VIEW) if !unique => self.create_view_stmt(),
+            Type::Keyword(Keyword::VIEW) if !unique => self.create_view_stmt(location, temporary),
             // TRIGGER ...
             Type::Keyword(Keyword::TRIGGER) if !unique => {
                 self.create_trigger_stmt(location, temporary)
@@ -642,16 +639,16 @@ impl<'a> Parser<'a> {
         let name = self.schema_table_container(None)?;
 
         // AS <select-stmt>
-        if self.is(Type::Keyword(Keyword::AS)) {
-            let src = Location::from(self.cur());
-            self.push_err(
-                "Unimplemented",
-                "CREATE TABLE ... AS <select_stmt> is not yet supported",
-                src,
-                Rule::Unimplemented,
-            );
-            self.skip_until_semicolon_or_eof();
-            return None;
+        if self.consume_if_keyword(Keyword::AS) {
+            let select = Box::new(self.select()?);
+            self.expect_end("https://www.sqlite.org/lang_createtable.html");
+            return some_box!(nodes::CreateTableAs {
+                location,
+                temporary,
+                if_not_exists,
+                name,
+                select,
+            });
         }
 
         self.consume(Type::BraceLeft);
@@ -874,17 +871,24 @@ impl<'a> Parser<'a> {
 
     /// https://www.sqlite.org/lang_createview.html
     #[cfg_attr(feature = "trace", trace)]
-    fn create_view_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+    fn create_view_stmt(
+        &mut self,
+        location: Location,
+        temporary: bool,
+    ) -> Option<Box<dyn nodes::Node>> {
         // VIEW
         self.consume_keyword(Keyword::VIEW);
 
         // IF NOT EXISTS
-        if self.consume_if_keyword(Keyword::IF) {
+        let if_not_exists = if self.consume_if_keyword(Keyword::IF) {
             self.consume_keyword(Keyword::NOT);
             self.consume_keyword(Keyword::EXISTS);
-        }
+            true
+        } else {
+            false
+        };
 
-        self.schema_table_container(Some("view"))?;
+        let name = self.schema_table_container(Some("view"))?;
         let mut columns = vec![];
 
         // (<column-name>, ...)
@@ -935,16 +939,7 @@ impl<'a> Parser<'a> {
         self.consume_keyword(Keyword::AS);
 
         // <select-stmt>
-        if self.is_keyword(Keyword::SELECT) {
-            let src = Location::from(self.cur());
-            self.push_err(
-                "Unimplemented",
-                "CREATE VIEW ... AS <select_stmt> is not yet supported",
-                src,
-                Rule::Unimplemented,
-            );
-            self.skip_until_semicolon_or_eof();
-        } else {
+        if !self.is_keyword(Keyword::SELECT) {
             let src = Location::from(self.cur());
             self.push_doc_err(
                 "Unexpected Token",
@@ -957,10 +952,20 @@ impl<'a> Parser<'a> {
                 "https://www.sqlite.org/lang_createview.html",
             );
             self.advance();
+            self.expect_end("https://www.sqlite.org/lang_createview.html");
+            return None;
         }
+        let select = Box::new(self.select()?);
 
         self.expect_end("https://www.sqlite.org/lang_createview.html");
-        None
+        some_box!(nodes::CreateView {
+            location,
+            temporary,
+            if_not_exists,
+            name,
+            columns,
+            select,
+        })
     }
 
     /// https://www.sqlite.org/lang_createtrigger.html
@@ -1633,15 +1638,16 @@ impl<'a> Parser<'a> {
     /// https://www.sqlite.org/syntax/common-table-expression.html
     #[cfg_attr(feature = "trace", trace)]
     fn with_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
-        // WITH [RECURSIVE] <common-table-expression>, ...
-        // CTE bodies require select-stmt support. Validate the envelope far enough to produce a
-        // precise unsupported diagnostic for the body instead of routing WITH to a statement parser.
-        self.consume_keyword(Keyword::WITH);
-        self.consume_if_keyword(Keyword::RECURSIVE);
+        let location = Location::from(self.cur());
 
+        // WITH [RECURSIVE] <common-table-expression>, ...
+        self.consume_keyword(Keyword::WITH);
+        let recursive = self.consume_if_keyword(Keyword::RECURSIVE);
+
+        let mut expressions = vec![];
         loop {
             // <common-table-expression>
-            self.common_table_expression()?;
+            expressions.push(self.common_table_expression()?);
 
             // , <common-table-expression>
             if self.consume_if(Type::Comma) {
@@ -1667,12 +1673,26 @@ impl<'a> Parser<'a> {
             break;
         }
 
-        None
+        let child = self.sql_stmt()?;
+        some_box!(nodes::With {
+            location,
+            recursive,
+            expressions,
+            child,
+        })
     }
 
     /// https://www.sqlite.org/lang_select.html
     #[cfg_attr(feature = "trace", trace)]
     fn select_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let select = self.select()?;
+        self.expect_end("https://www.sqlite.org/lang_select.html");
+        some_box!(select)
+    }
+
+    /// https://www.sqlite.org/lang_select.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn select(&mut self) -> Option<nodes::Select> {
         let location = Location::from(self.cur());
 
         // SELECT [DISTINCT | ALL] <result-column>, ...
@@ -1732,9 +1752,7 @@ impl<'a> Parser<'a> {
             return None;
         }
 
-        self.expect_end("https://www.sqlite.org/lang_select.html");
-
-        some_box!(nodes::Select {
+        Some(nodes::Select {
             location,
             quantifier,
             columns,
@@ -2049,16 +2067,7 @@ impl<'a> Parser<'a> {
 
         // <select-stmt>
         if self.is_keyword(Keyword::SELECT) {
-            let src = Location::from(self.cur());
-            self.push_doc_err(
-                "Unimplemented",
-                "INSERT ... <select-stmt> is not yet supported",
-                src,
-                Rule::Unimplemented,
-                "https://www.sqlite.org/lang_select.html",
-            );
-            self.skip_until_semicolon_or_eof();
-            return None;
+            return Some(nodes::InsertSource::Select(Box::new(self.select()?)));
         }
 
         let src = Location::from(self.cur());
@@ -2320,57 +2329,44 @@ impl<'a> Parser<'a> {
 
     /// https://www.sqlite.org/syntax/common-table-expression.html
     #[cfg_attr(feature = "trace", trace)]
-    fn common_table_expression(&mut self) -> Option<()> {
+    fn common_table_expression(&mut self) -> Option<nodes::CommonTableExpression> {
         // <table-name>
-        self.consume_ident(
+        let name = self.consume_ident(
             "https://www.sqlite.org/syntax/common-table-expression.html",
             "table_name",
         )?;
 
         // (<column-name>, ...)
-        if self.consume_if(Type::BraceLeft) {
-            self.column_name_list("WITH common table expression")?;
+        let columns = if self.consume_if(Type::BraceLeft) {
+            let columns = self.column_name_list("WITH common table expression")?;
             self.consume(Type::BraceRight);
-        }
+            columns
+        } else {
+            vec![]
+        };
 
         // AS [NOT] MATERIALIZED
         self.consume_keyword(Keyword::AS);
-        if self.consume_if_keyword(Keyword::NOT) {
+        let materialized = if self.consume_if_keyword(Keyword::NOT) {
             self.consume_keyword(Keyword::MATERIALIZED);
+            Some(false)
+        } else if self.consume_if_keyword(Keyword::MATERIALIZED) {
+            Some(true)
         } else {
-            self.consume_if_keyword(Keyword::MATERIALIZED);
-        }
+            None
+        };
 
         // (<select-stmt>)
         self.consume(Type::BraceLeft);
-        self.reject_cte_body()
-    }
+        let select = Box::new(self.select()?);
+        self.consume(Type::BraceRight);
 
-    /// Rejects a CTE body until select-stmt parsing exists.
-    ///
-    /// See: https://www.sqlite.org/syntax/common-table-expression.html
-    #[cfg_attr(feature = "trace", trace)]
-    fn reject_cte_body(&mut self) -> Option<()> {
-        let src = Location::from(self.cur());
-        if self.is_keyword(Keyword::SELECT) {
-            self.push_doc_err(
-                "Unimplemented",
-                "SELECT in WITH common table expressions is not yet supported",
-                src,
-                Rule::Unimplemented,
-                "https://www.sqlite.org/lang_select.html",
-            );
-        } else {
-            self.push_doc_err(
-                "Unimplemented",
-                "WITH common table expression bodies require select-stmt support, which is not yet implemented",
-                src,
-                Rule::Unimplemented,
-                "https://www.sqlite.org/lang_select.html",
-            );
-        }
-        self.skip_until_semicolon_or_eof();
-        None
+        Some(nodes::CommonTableExpression {
+            name,
+            columns,
+            materialized,
+            select,
+        })
     }
 
     /// https://www.sqlite.org/syntax/qualified-table-name.html

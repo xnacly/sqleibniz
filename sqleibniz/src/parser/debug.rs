@@ -24,11 +24,28 @@ pub trait FieldHookContexts {
     fn field_hook_contexts(&self) -> Vec<HookContext>;
 }
 
+pub trait FieldDiagnostics {
+    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error>;
+}
+
 macro_rules! impl_empty_field_hook_contexts {
     ($($tt:ty),*) => {
         $(
             impl FieldHookContexts for $tt {
                 fn field_hook_contexts(&self) -> Vec<HookContext> {
+                    vec![]
+                }
+            }
+        )*
+    };
+}
+
+macro_rules! impl_empty_field_diagnostics {
+    ($($tt:ty),*) => {
+        $(
+            impl FieldDiagnostics for $tt {
+                fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+                    let _ = file;
                     vec![]
                 }
             }
@@ -140,7 +157,21 @@ impl FieldSerializable for InsertSource {
                     })
                     .collect(),
             ),
+            InsertSource::Select(select) => serde_json::json!({
+                "select": select.as_serializable(),
+            }),
         }
+    }
+}
+
+impl FieldSerializable for CommonTableExpression {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "columns": self.columns,
+            "materialized": self.materialized,
+            "select": self.select.as_serializable(),
+        })
     }
 }
 
@@ -158,7 +189,29 @@ impl FieldHookContexts for InsertSource {
         match self {
             InsertSource::DefaultValues => vec![],
             InsertSource::Values(rows) => rows.field_hook_contexts(),
+            InsertSource::Select(select) => vec![select.as_hook_context()],
         }
+    }
+}
+
+impl FieldDiagnostics for InsertSource {
+    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+        match self {
+            InsertSource::DefaultValues | InsertSource::Values(_) => vec![],
+            InsertSource::Select(select) => select.analyse(file),
+        }
+    }
+}
+
+impl FieldHookContexts for CommonTableExpression {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        vec![self.select.as_hook_context()]
+    }
+}
+
+impl FieldDiagnostics for CommonTableExpression {
+    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+        self.select.analyse(file)
     }
 }
 
@@ -290,15 +343,21 @@ impl FieldHookContexts for Token {
     }
 }
 
-impl FieldSerializable for Box<dyn Node> {
+impl<T: Node + ?Sized> FieldSerializable for Box<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
         self.as_serializable()
     }
 }
 
-impl FieldHookContexts for Box<dyn Node> {
+impl<T: Node + ?Sized> FieldHookContexts for Box<T> {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         vec![self.as_hook_context()]
+    }
+}
+
+impl<T: Node + ?Sized> FieldDiagnostics for Box<T> {
+    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+        self.analyse(file)
     }
 }
 
@@ -320,6 +379,15 @@ impl<T: FieldHookContexts> FieldHookContexts for Option<T> {
     }
 }
 
+impl<T: FieldDiagnostics> FieldDiagnostics for Option<T> {
+    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+        match self {
+            Some(n) => n.field_diagnostics(file),
+            None => vec![],
+        }
+    }
+}
+
 impl<T: FieldSerializable> FieldSerializable for Vec<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::Value::Array(self.iter().map(|n| n.field_as_serializable()).collect())
@@ -329,6 +397,14 @@ impl<T: FieldSerializable> FieldSerializable for Vec<T> {
 impl<T: FieldHookContexts> FieldHookContexts for Vec<T> {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         self.iter().flat_map(|n| n.field_hook_contexts()).collect()
+    }
+}
+
+impl<T: FieldDiagnostics> FieldDiagnostics for Vec<T> {
+    fn field_diagnostics(&self, file: &str) -> Vec<crate::error::Error> {
+        self.iter()
+            .flat_map(|n| n.field_diagnostics(file))
+            .collect()
     }
 }
 
@@ -347,6 +423,35 @@ impl_empty_field_hook_contexts!(
     TriggerTiming,
     TriggerEvent,
     TriggerBodyStmt
+);
+
+impl_empty_field_diagnostics!(
+    String,
+    bool,
+    Token,
+    Keyword,
+    SqliteStorageClass,
+    BindParameter,
+    Expr,
+    SchemaTableContainer,
+    QualifiedTableName,
+    QualifiedTableIndex,
+    IndexedColumn,
+    ResultColumn,
+    SelectQuantifier,
+    SelectSource,
+    SelectTable,
+    JoinOperator,
+    OrderingTerm,
+    LimitOffset,
+    UpdateAssignment,
+    ColumnConstraint,
+    TableConstraint,
+    ForeignKeyClause,
+    TriggerTiming,
+    TriggerEvent,
+    TriggerBodyStmt,
+    PragmaInvocation
 );
 
 impl FieldHookContexts for ResultColumn {

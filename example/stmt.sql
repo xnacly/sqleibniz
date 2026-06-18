@@ -112,6 +112,11 @@ CREATE TABLE user_teams (
     team_id INTEGER,
     FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE
 ) STRICT;
+CREATE TABLE archived_user_ids AS SELECT id FROM users;
+
+-- https://www.sqlite.org/lang_createview.html
+CREATE VIEW active_users AS SELECT id FROM users;
+CREATE TEMP VIEW IF NOT EXISTS temp.active_user_ids (id) AS SELECT id FROM users;
 
 -- https://www.sqlite.org/lang_createindex.html
 CREATE INDEX idx_users_id ON users (id);
@@ -136,6 +141,7 @@ INSERT INTO users DEFAULT VALUES;
 INSERT INTO main.users (id, name) VALUES (1, 'Ada');
 INSERT INTO users (id, name) VALUES (1, 'Ada'), (2, 'Grace');
 INSERT OR IGNORE INTO users (id) VALUES (1) RETURNING *, id AS inserted_id;
+INSERT INTO archived_user_ids SELECT id FROM users;
 
 -- https://www.sqlite.org/lang_update.html
 UPDATE users SET name = 'Ada';
@@ -150,6 +156,7 @@ SELECT *, users.* FROM main.users;
 SELECT id AS user_id, lower(name) AS normalized FROM users ORDER BY id DESC LIMIT 10 OFFSET 5;
 SELECT DISTINCT team_id FROM users GROUP BY team_id HAVING count(id) > 1;
 SELECT u.id FROM users AS u LEFT OUTER JOIN teams AS t ON u.team_id = t.id;
+WITH stale AS (SELECT id FROM archived_user_ids) SELECT id FROM stale;
 
 -- https://www.sqlite.org/pragma.html
 PRAGMA database_list;

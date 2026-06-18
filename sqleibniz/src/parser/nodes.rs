@@ -1,5 +1,5 @@
 use crate::error::{Error, Location};
-use crate::parser::debug::{FieldHookContexts, FieldSerializable};
+use crate::parser::debug::{FieldDiagnostics, FieldHookContexts, FieldSerializable};
 use crate::types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass};
 
 macro_rules! field_hook_contexts {
@@ -15,6 +15,34 @@ macro_rules! field_hook_contexts {
         .into_iter()
         .flatten()
         .collect::<Vec<HookContext>>()
+    };
+}
+
+macro_rules! field_diagnostics {
+    ($file:expr,) => {
+        {
+            let _ = $file;
+            Vec::new()
+        }
+    };
+    ($file:expr, $($field:expr),+ $(,)?) => {
+        vec![
+            $(
+                $field.field_diagnostics($file),
+            )+
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<Error>>()
+    };
+}
+
+macro_rules! node_diagnostics {
+    ($file:expr, [$($field:expr),*], $analyser:path, $node:expr) => {{
+        $analyser($file, $node)
+    }};
+    ($file:expr, [$($field:expr),*], $node:expr) => {
+        field_diagnostics!($file, $($field),*)
     };
 }
 
@@ -77,11 +105,9 @@ macro_rules! node {
                 $documentation
             }
 
-            $(
-                fn analyse(&self, file: &str) -> Vec<Error> {
-                    $analyser(file, self)
-                }
-            )?
+            fn analyse(&self, file: &str) -> Vec<Error> {
+                node_diagnostics!(file, [$(self.$field_name),*] $(, $analyser)?, self)
+            }
         }
 
         #[cfg(test)]
@@ -454,6 +480,15 @@ SELECT users.* FROM users ORDER BY id LIMIT 10;
 pub enum InsertSource {
     DefaultValues,
     Values(Vec<Vec<Expr>>),
+    Select(Box<Select>),
+}
+
+#[derive(Debug)]
+pub struct CommonTableExpression {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub materialized: Option<bool>,
+    pub select: Box<Select>,
 }
 
 #[derive(Debug)]
@@ -492,6 +527,7 @@ The INSERT command creates new rows in a table.
 ```sql
 INSERT INTO table_name DEFAULT VALUES;
 INSERT INTO table_name (id, name) VALUES (1, 'Ada');
+INSERT INTO table_name SELECT id, name FROM old_table;
 INSERT OR IGNORE INTO schema_name.table_name VALUES (1) RETURNING *;
 ```
 ",
@@ -729,6 +765,57 @@ CREATE TABLE table_name (column_def, ...) STRICT;
     strict: bool,
     without_rowid: bool
     ; analyse(crate::analyse::create::create_table)
+);
+
+node!(
+    CreateTableAs,
+    r"CREATE TABLE AS statement, see: https://www.sqlite.org/lang_createtable.html
+
+The CREATE TABLE AS form creates a table from a SELECT statement.
+
+```sql
+CREATE TABLE table_name AS SELECT id FROM old_table;
+CREATE TEMP TABLE IF NOT EXISTS schema.table_name AS SELECT id FROM old_table;
+```
+",
+    temporary: bool,
+    if_not_exists: bool,
+    name: SchemaTableContainer,
+    select: Box<Select>
+);
+
+node!(
+    CreateView,
+    r"CREATE VIEW statement, see: https://www.sqlite.org/lang_createview.html
+
+The CREATE VIEW command creates a named SELECT statement.
+
+```sql
+CREATE VIEW view_name AS SELECT id FROM table_name;
+CREATE TEMP VIEW IF NOT EXISTS schema.view_name (id) AS SELECT id FROM table_name;
+```
+",
+    temporary: bool,
+    if_not_exists: bool,
+    name: SchemaTableContainer,
+    columns: Vec<String>,
+    select: Box<Select>
+);
+
+node!(
+    With,
+    r"WITH statement, see: https://www.sqlite.org/lang_with.html
+
+The WITH clause defines common table expressions for a following statement.
+
+```sql
+WITH rows AS (SELECT id FROM table_name) SELECT id FROM rows;
+WITH RECURSIVE rows(id) AS NOT MATERIALIZED (SELECT 1) SELECT id FROM rows;
+```
+",
+    recursive: bool,
+    expressions: Vec<CommonTableExpression>,
+    child: Box<dyn Node>
 );
 
 #[derive(Debug, serde::Serialize)]

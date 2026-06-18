@@ -41,10 +41,10 @@ macro_rules! test_group_pass_assert {
 mod should_pass {
     use crate::{
         parser::nodes::{
-            Alter, ColumnConstraint, ColumnDef, Delete, Expr, Insert, InsertSource, JoinOperator,
-            LimitOffset, OrderingTerm, QualifiedTableIndex, QualifiedTableName, ResultColumn,
-            SchemaTableContainer, Select, SelectQuantifier, SelectSource, SelectTable, Update,
-            UpdateAssignment,
+            Alter, ColumnConstraint, ColumnDef, CommonTableExpression, CreateTableAs, CreateView,
+            Delete, Expr, Insert, InsertSource, JoinOperator, LimitOffset, OrderingTerm,
+            QualifiedTableIndex, QualifiedTableName, ResultColumn, SchemaTableContainer, Select,
+            SelectQuantifier, SelectSource, SelectTable, Update, UpdateAssignment, With,
         },
         types::{Keyword, Token, Type, storage::SqliteStorageClass},
     };
@@ -179,9 +179,40 @@ mod should_pass {
         order_by: Vec<OrderingTerm>,
         limit: Option<LimitOffset>,
     ) -> Vec<Select> {
-        vec![Select::new(
+        vec![select_node(
             quantifier, columns, from, where_expr, group_by, having, order_by, limit,
         )]
+    }
+
+    fn select_node(
+        quantifier: Option<SelectQuantifier>,
+        columns: Vec<ResultColumn>,
+        from: Vec<SelectSource>,
+        where_expr: Option<Expr>,
+        group_by: Vec<Expr>,
+        having: Option<Expr>,
+        order_by: Vec<OrderingTerm>,
+        limit: Option<LimitOffset>,
+    ) -> Select {
+        Select::new(
+            quantifier, columns, from, where_expr, group_by, having, order_by, limit,
+        )
+    }
+
+    fn select_id_from(table: &str) -> Select {
+        select_node(
+            None,
+            vec![ResultColumn::Expr {
+                expr: col("id"),
+                alias: None,
+            }],
+            vec![stable(SchemaTableContainer::Table(table.into()))],
+            None,
+            vec![],
+            None,
+            vec![],
+            None,
+        )
     }
 
     fn stable(name: SchemaTableContainer) -> SelectSource {
@@ -464,6 +495,15 @@ mod should_pass {
                 ResultColumn::Star,
                 ResultColumn::Expr { expr: col("id"), alias: Some("inserted_id".into()) },
             ],
+        ),
+
+        insert_select:
+        r"INSERT INTO users SELECT id FROM old_users;"=insert(
+            None,
+            SchemaTableContainer::Table("users".into()),
+            vec![],
+            InsertSource::Select(Box::new(select_id_from("old_users"))),
+            vec![],
         )
     }
 
@@ -1176,6 +1216,97 @@ mod should_pass {
             }],
             false,
             false,
+        )],
+
+        create_table_as_select:
+        r"CREATE TEMP TABLE IF NOT EXISTS users AS SELECT id FROM old_users;"=
+        vec![CreateTableAs::new(
+            true,
+            true,
+            SchemaTableContainer::Table("users".into()),
+            Box::new(select_id_from("old_users")),
+        )]
+    }
+
+    test_group_pass_assert! {
+        create_view_stmt,
+
+        create_view_select:
+        r"CREATE VIEW active_users AS SELECT id FROM users;"=
+        vec![CreateView::new(
+            false,
+            false,
+            SchemaTableContainer::Table("active_users".into()),
+            vec![],
+            Box::new(select_id_from("users")),
+        )],
+
+        create_temp_view_column_list_select:
+        r"CREATE TEMP VIEW IF NOT EXISTS temp.active_users (id) AS SELECT id FROM users;"=
+        vec![CreateView::new(
+            true,
+            true,
+            SchemaTableContainer::SchemaAndTable {
+                schema: "temp".into(),
+                table: "active_users".into(),
+            },
+            vec!["id".into()],
+            Box::new(select_id_from("users")),
+        )]
+    }
+
+    test_group_pass_assert! {
+        with_stmt,
+
+        with_select:
+        r"WITH stale AS (SELECT id FROM old_users) SELECT id FROM stale;"=
+        vec![With::new(
+            false,
+            vec![CommonTableExpression {
+                name: "stale".into(),
+                columns: vec![],
+                materialized: None,
+                select: Box::new(select_id_from("old_users")),
+            }],
+            Box::new(select_id_from("stale")),
+        )],
+
+        with_recursive_not_materialized_insert:
+        r"WITH RECURSIVE stale(id) AS NOT MATERIALIZED (SELECT id FROM old_users) INSERT INTO users SELECT id FROM stale;"=
+        vec![With::new(
+            true,
+            vec![CommonTableExpression {
+                name: "stale".into(),
+                columns: vec!["id".into()],
+                materialized: Some(false),
+                select: Box::new(select_id_from("old_users")),
+            }],
+            Box::new(Insert::new(
+                None,
+                SchemaTableContainer::Table("users".into()),
+                vec![],
+                InsertSource::Select(Box::new(select_id_from("stale"))),
+                vec![],
+            )),
+        )],
+
+        with_materialized_delete:
+        r"WITH stale AS MATERIALIZED (SELECT id FROM old_users) DELETE FROM users;"=
+        vec![With::new(
+            false,
+            vec![CommonTableExpression {
+                name: "stale".into(),
+                columns: vec![],
+                materialized: Some(true),
+                select: Box::new(select_id_from("old_users")),
+            }],
+            Box::new(Delete::new(
+                qtable(SchemaTableContainer::Table("users".into())),
+                None,
+                vec![],
+                vec![],
+                None,
+            )),
         )]
     }
 
@@ -2359,7 +2490,6 @@ mod should_fail {
         invalid_foreign_key_match: "ALTER TABLE schema.table_name ADD COLUMN column_name TEXT REFERENCES foreign_table MATCH wat;" => Rule::Syntax, "Wanted FULL, PARTIAL or SIMPLE after MATCH",
         create_table_empty_column_list: "CREATE TABLE users ();" => Rule::Syntax, "requires at least one column definition",
         create_table_trailing_comma: "CREATE TABLE users (id INTEGER,);" => Rule::Syntax, "Expected Ident(<name>)",
-        create_table_as_select_unimplemented: "CREATE TABLE users AS SELECT id FROM old_users;" => Rule::Unimplemented, "CREATE TABLE ... AS <select_stmt> is not yet supported",
         create_virtual_table_unimplemented: "CREATE VIRTUAL TABLE docs USING fts5(content);" => Rule::Unimplemented, "CREATE VIRTUAL TABLE is not yet supported",
         create_table_unknown_option: "CREATE TABLE users (id INTEGER) ROWID;" => Rule::Syntax, "expected STRICT or WITHOUT ROWID",
         create_table_without_missing_rowid: "CREATE TABLE users (id INTEGER) WITHOUT;" => Rule::Syntax, "Wanted Keyword(ROWID)",
@@ -2384,8 +2514,6 @@ mod should_fail {
         create_view_missing_name: "CREATE VIEW AS SELECT id FROM users;" => Rule::Syntax, "expected either schema_name.view or view",
         create_view_missing_as: "CREATE VIEW active_users SELECT id FROM users;" => Rule::Syntax, "Wanted Keyword(AS)",
         create_view_missing_select: "CREATE VIEW active_users AS 12;" => Rule::Syntax, "requires select-stmt after AS",
-        create_view_select_unimplemented: "CREATE VIEW active_users AS SELECT id FROM users;" => Rule::Unimplemented, "CREATE VIEW ... AS <select_stmt> is not yet supported",
-        create_view_column_list_select_unimplemented: "CREATE TEMP VIEW IF NOT EXISTS temp.active_users (id, name) AS SELECT id, name FROM users;" => Rule::Unimplemented, "CREATE VIEW ... AS <select_stmt> is not yet supported",
         create_trigger_missing_name: "CREATE TRIGGER AFTER INSERT ON users BEGIN SELECT 1; END;" => Rule::Syntax, "expected either schema_name.trigger or trigger",
         create_trigger_missing_event: "CREATE TRIGGER user_ai ON users BEGIN SELECT 1; END;" => Rule::Syntax, "expected BEFORE, AFTER, INSTEAD OF, DELETE, INSERT or UPDATE",
         create_trigger_update_of_missing_column: "CREATE TRIGGER user_au UPDATE OF ON users BEGIN SELECT 1; END;" => Rule::Syntax, "Expected Ident(<column_name>)",
@@ -2404,9 +2532,7 @@ mod should_fail {
         delete_returning_trailing_comma: "DELETE FROM users RETURNING id,;" => Rule::Syntax, "result column list has a trailing comma",
         delete_order_by_trailing_comma: "DELETE FROM users ORDER BY id, LIMIT 1;" => Rule::Syntax, "ORDER BY term list has a trailing comma",
         delete_order_by_nulls_invalid: "DELETE FROM users ORDER BY id NULLS NO;" => Rule::Syntax, "Wanted FIRST or LAST after NULLS",
-        delete_with_select_unimplemented: "WITH stale AS (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
-        delete_with_recursive_select_unimplemented: "WITH RECURSIVE stale AS NOT MATERIALIZED (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
-        delete_with_body_unimplemented: "WITH stale AS (VALUES (1)) DELETE FROM users;" => Rule::Unimplemented, "WITH common table expression bodies require select-stmt support",
+        with_non_select_body: "WITH stale AS (VALUES (1)) DELETE FROM users;" => Rule::Syntax, "Wanted Keyword(SELECT)",
         insert_missing_into: "INSERT users VALUES (1);" => Rule::Syntax, "Wanted Keyword(INTO)",
         insert_bad_conflict_algorithm: "INSERT OR NO INTO users VALUES (1);" => Rule::Syntax, "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after INSERT OR",
         insert_missing_source: "INSERT INTO users;" => Rule::Syntax, "INSERT expected DEFAULT VALUES, VALUES or select-stmt",
@@ -2415,8 +2541,6 @@ mod should_fail {
         insert_empty_values_row: "INSERT INTO users VALUES ();" => Rule::Syntax, "INSERT VALUES row requires at least one expression",
         insert_values_row_trailing_comma: "INSERT INTO users VALUES (1,);" => Rule::Syntax, "INSERT VALUES row has a trailing comma",
         insert_values_rows_trailing_comma: "INSERT INTO users VALUES (1),;" => Rule::Syntax, "INSERT VALUES row list has a trailing comma",
-        insert_with_select_unimplemented: "WITH stale AS (SELECT 1) INSERT INTO users VALUES (1);" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
-        insert_select_unimplemented: "INSERT INTO users SELECT id FROM old_users;" => Rule::Unimplemented, "INSERT ... <select-stmt> is not yet supported",
         insert_upsert_unimplemented: "INSERT INTO users VALUES (1) ON CONFLICT(id) DO NOTHING;" => Rule::Unimplemented, "INSERT upsert-clause is not yet supported",
         update_missing_table: "UPDATE SET name = 'Ada';" => Rule::Syntax, "expected either schema_name.table or table",
         update_missing_set: "UPDATE users name = 'Ada';" => Rule::Syntax, "Wanted Keyword(SET)",
@@ -2427,7 +2551,6 @@ mod should_fail {
         update_column_list_empty: "UPDATE users SET () = user_defaults();" => Rule::Syntax, "requires at least one column name",
         update_column_list_trailing_comma: "UPDATE users SET (name,) = user_defaults();" => Rule::Syntax, "column list has a trailing comma",
         update_from_unimplemented: "UPDATE users SET name = old_users.name FROM old_users WHERE users.id = old_users.id;" => Rule::Unimplemented, "UPDATE FROM is not yet supported",
-        update_with_select_unimplemented: "WITH stale AS (SELECT 1) UPDATE users SET name = 'Ada';" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
         select_trailing_result_column: "SELECT id, FROM users;" => Rule::Syntax, "result column list has a trailing comma",
         select_from_trailing_comma: "SELECT id FROM users, WHERE active = true;" => Rule::Syntax, "SELECT FROM table list has a trailing comma",
         select_group_by_trailing_comma: "SELECT team_id FROM users GROUP BY team_id, ORDER BY team_id;" => Rule::Syntax, "SELECT GROUP BY expression list has a trailing comma",

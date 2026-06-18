@@ -1066,6 +1066,11 @@ mod should_pass {
                 },
                 PragmaInvocation::Assign { value: Token::new(Type::Keyword(Keyword::EXCLUSIVE)) }
             )],
+        assign_boolean:"PRAGMA foreign_keys = true;"=vec![
+            Pragma::new(
+                SchemaTableContainer::Table("foreign_keys".into()),
+                PragmaInvocation::Assign { value: Token::new(Type::Boolean(true)) }
+            )],
         call:"PRAGMA schema.optimize(0xfffe);"=vec![
             Pragma::new(
             SchemaTableContainer::SchemaAndTable{
@@ -1073,6 +1078,11 @@ mod should_pass {
                 table: "optimize".into(),
             },
             PragmaInvocation::Call { value: Token::new(Type::Number(0xfffe as f64)) }
+            )],
+        call_boolean:"PRAGMA foreign_keys(false);"=vec![
+            Pragma::new(
+                SchemaTableContainer::Table("foreign_keys".into()),
+                PragmaInvocation::Call { value: Token::new(Type::Boolean(false)) }
             )]
     }
 

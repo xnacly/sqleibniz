@@ -252,7 +252,11 @@ impl<'a> Parser<'a> {
     fn is_pragma_value(&self) -> bool {
         matches!(
             self.cur().ttype,
-            Type::String(_) | Type::Number(_) | Type::Ident(_) | Type::Keyword(_)
+            Type::String(_)
+                | Type::Number(_)
+                | Type::Boolean(_)
+                | Type::Ident(_)
+                | Type::Keyword(_)
         )
     }
 
@@ -262,7 +266,7 @@ impl<'a> Parser<'a> {
             self.push_err(
                 "Bad pragma value",
                 &format!(
-                    "A pragma {invocation_kind} value has to be either String, Number, Ident or a Keyword, got {:?} instead",
+                    "A pragma {invocation_kind} value has to be either String, Number, Boolean, Ident or a Keyword, got {:?} instead",
                     cur.ttype
                 ),
                 &cur,

@@ -111,3 +111,43 @@ fn hook_diagnostics_can_be_disabled() {
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn hooks_skip_expected_statement_tokens() {
+    let config = temp_file(
+        "hooks-content",
+        "lua",
+        r#"
+leibniz = {
+    hooks = {
+        {
+            name = "idents should be lowercase",
+            match = { node = "Token", kind = "Ident" },
+            hook = function(node)
+                if string.match(node.content, "%u") then
+                    sqleibniz.diagnostic(node, node.content)
+                end
+            end
+        }
+    }
+}
+"#,
+    );
+    let sql = temp_file(
+        "uppercase-ident-expected",
+        "sql",
+        "-- @sqleibniz::expect\nVACUUM ExpectedName;\nVACUUM ReportedName;",
+    );
+
+    let output = sqleibniz(&[
+        arg("--kiss"),
+        arg("--config"),
+        file_arg(&config),
+        file_arg(&sql),
+    ]);
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("ExpectedName"));
+    assert!(stdout.contains("ReportedName"));
+}

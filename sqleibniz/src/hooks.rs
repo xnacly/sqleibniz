@@ -1,7 +1,7 @@
 use crate::{
     error::{Error, Location},
     parser::nodes::Node,
-    types::{Token, config::Hook, ctx::HookContext, rules::Rule},
+    types::{Token, Type, config::Hook, ctx::HookContext, rules::Rule},
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -135,7 +135,20 @@ pub fn run(
         run_context(lua, file, hooks, &node.as_hook_context(), &mut errors);
     }
 
+    let mut skip_expected_statement = false;
     for token in tokens {
+        if skip_expected_statement {
+            if token.ttype == Type::Semicolon {
+                skip_expected_statement = false;
+            }
+            continue;
+        }
+
+        if token.ttype == Type::InstructionExpect {
+            skip_expected_statement = true;
+            continue;
+        }
+
         run_context(lua, file, hooks, &HookContext::token(token), &mut errors);
     }
 

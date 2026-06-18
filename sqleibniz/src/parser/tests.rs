@@ -1631,12 +1631,28 @@ mod should_analyze {
         alter_add_column_missing_type:
             "ALTER TABLE users ADD COLUMN name;" => Rule::Quirk, "SQLite allows columns without a declared type",
         nullable_column_primary_key:
-            "CREATE TABLE users (email TEXT PRIMARY KEY);" => Rule::Quirk, "PRIMARY KEY columns"
+            "CREATE TABLE users (email TEXT PRIMARY KEY);" => Rule::Quirk, "PRIMARY KEY columns",
+        deprecated_pragma:
+            "PRAGMA case_sensitive_like = true;" => Rule::Quirk, "deprecated",
+        foreign_keys_disabled:
+            "PRAGMA foreign_keys = false;" => Rule::Quirk, "foreign key constraints",
+        ignore_check_constraints_enabled:
+            "PRAGMA ignore_check_constraints = 1;" => Rule::Quirk, "CHECK constraint enforcement",
+        writable_schema_enabled:
+            "PRAGMA writable_schema = ON;" => Rule::Quirk, "corrupt the database"
     }
 
     test_group_analysis_pass! {
         negative_diagnostic_tests,
         create_table_strict_has_no_recommendation:
-            "CREATE TABLE users (id INTEGER) STRICT;"
+            "CREATE TABLE users (id INTEGER) STRICT;",
+        foreign_keys_query_has_no_recommendation:
+            "PRAGMA foreign_keys;",
+        foreign_keys_enabled_has_no_recommendation:
+            "PRAGMA foreign_keys = true;",
+        ignore_check_constraints_disabled_has_no_recommendation:
+            "PRAGMA ignore_check_constraints = 0;",
+        unknown_pragma_has_no_recommendation:
+            "PRAGMA application_id;"
     }
 }

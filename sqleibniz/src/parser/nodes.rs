@@ -395,7 +395,7 @@ pub struct OrderingTerm {
 }
 
 #[derive(Debug)]
-pub struct DeleteLimit {
+pub struct LimitOffset {
     pub limit: Expr,
     pub offset: Option<Expr>,
 }
@@ -405,6 +405,36 @@ pub enum InsertSource {
     DefaultValues,
     Values(Vec<Vec<Expr>>),
 }
+
+#[derive(Debug)]
+pub struct UpdateAssignment {
+    pub columns: Vec<String>,
+    pub expr: Expr,
+}
+
+node!(
+    Update,
+    r"UPDATE statement, see: https://www.sqlite.org/lang_update.html
+
+The UPDATE command changes existing rows in a table. This node represents SQLite's UPDATE
+statement forms that do not require table-source parsing: conflict algorithms, qualified table
+targets, SET assignments, WHERE, RETURNING, ORDER BY, and LIMIT. UPDATE FROM produces an
+unsupported diagnostic until table-or-subquery parsing exists.
+
+```sql
+UPDATE table_name SET column_name = 'value';
+UPDATE OR FAIL schema_name.table_name SET name = 'Ada' WHERE id = 1 RETURNING *;
+UPDATE users SET (name, email) = user_defaults();
+```
+",
+    conflict: Option<Keyword>,
+    target: QualifiedTableName,
+    assignments: Vec<UpdateAssignment>,
+    where_expr: Option<Expr>,
+    returning: Vec<ReturningColumn>,
+    order_by: Vec<OrderingTerm>,
+    limit: Option<LimitOffset>
+);
 
 node!(
     Insert,
@@ -447,7 +477,7 @@ DELETE FROM users AS u INDEXED BY idx_users_id WHERE u.id = 1 RETURNING *;
     where_expr: Option<Expr>,
     returning: Vec<ReturningColumn>,
     order_by: Vec<OrderingTerm>,
-    limit: Option<DeleteLimit>
+    limit: Option<LimitOffset>
 );
 
 node!(

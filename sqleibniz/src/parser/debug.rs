@@ -84,7 +84,7 @@ impl FieldSerializable for OrderingTerm {
     }
 }
 
-impl FieldSerializable for DeleteLimit {
+impl FieldSerializable for LimitOffset {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::json!({
             "limit": self.limit.as_serializable(),
@@ -110,12 +110,27 @@ impl FieldSerializable for InsertSource {
     }
 }
 
+impl FieldSerializable for UpdateAssignment {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::json!({
+            "columns": self.columns,
+            "expr": self.expr.as_serializable(),
+        })
+    }
+}
+
 impl FieldHookContexts for InsertSource {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         match self {
             InsertSource::DefaultValues => vec![],
             InsertSource::Values(rows) => rows.field_hook_contexts(),
         }
+    }
+}
+
+impl FieldHookContexts for UpdateAssignment {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        self.expr.field_hook_contexts()
     }
 }
 
@@ -312,7 +327,7 @@ impl FieldHookContexts for OrderingTerm {
     }
 }
 
-impl FieldHookContexts for DeleteLimit {
+impl FieldHookContexts for LimitOffset {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         let mut contexts = self.limit.field_hook_contexts();
         if let Some(offset) = &self.offset {

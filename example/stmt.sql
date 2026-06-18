@@ -137,6 +137,12 @@ INSERT INTO main.users (id, name) VALUES (1, 'Ada');
 INSERT INTO users (id, name) VALUES (1, 'Ada'), (2, 'Grace');
 INSERT OR IGNORE INTO users (id) VALUES (1) RETURNING *, id AS inserted_id;
 
+-- https://www.sqlite.org/lang_update.html
+UPDATE users SET name = 'Ada';
+UPDATE OR FAIL main.users SET name = 'Ada' WHERE id = 1;
+UPDATE users AS u NOT INDEXED SET name = 'Ada' WHERE u.id = 1;
+UPDATE users SET active = false WHERE last_seen < 10 RETURNING *, id AS updated_id ORDER BY last_seen DESC LIMIT 5 OFFSET 2;
+
 -- https://www.sqlite.org/pragma.html
 PRAGMA database_list;
 PRAGMA schema.cache_size = 5;

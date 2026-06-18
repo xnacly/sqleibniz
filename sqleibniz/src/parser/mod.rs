@@ -443,6 +443,7 @@ impl<'a> Parser<'a> {
             Type::Keyword(Keyword::DROP) => self.drop_stmt(),
             Type::Keyword(Keyword::ANALYZE) => self.analyze_stmt(),
             Type::Keyword(Keyword::INSERT) => self.insert_stmt(),
+            Type::Keyword(Keyword::UPDATE) => self.update_stmt(),
             Type::Keyword(Keyword::DELETE) => self.delete_stmt(),
             Type::Keyword(Keyword::WITH) => self.with_stmt(),
             Type::Keyword(Keyword::DETACH) => self.detach_stmt(),
@@ -1675,7 +1676,7 @@ impl<'a> Parser<'a> {
 
         // INSERT [OR <conflict-algorithm>] INTO <schema-name.table-name|table-name>
         self.consume_keyword(Keyword::INSERT);
-        let conflict = self.insert_conflict_algorithm()?;
+        let conflict = self.statement_conflict_algorithm("INSERT")?;
         self.consume_keyword(Keyword::INTO);
         let target = self.schema_table_container(Some("table"))?;
 
@@ -1717,11 +1718,20 @@ impl<'a> Parser<'a> {
 
     /// https://www.sqlite.org/syntax/insert-stmt.html
     #[cfg_attr(feature = "trace", trace)]
-    fn insert_conflict_algorithm(&mut self) -> Option<Option<Keyword>> {
+    fn statement_conflict_algorithm(&mut self, statement: &'static str) -> Option<Option<Keyword>> {
         // OR ROLLBACK | OR ABORT | OR REPLACE | OR FAIL | OR IGNORE
         if !self.consume_if_keyword(Keyword::OR) {
             return Some(None);
         }
+
+        let doc = match statement {
+            "UPDATE" => "https://www.sqlite.org/lang_update.html",
+            _ => "https://www.sqlite.org/lang_insert.html",
+        };
+        let note = match statement {
+            "UPDATE" => "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after UPDATE OR",
+            _ => "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after INSERT OR",
+        };
 
         Some(Some(self.consume_required_keyword(
             &[
@@ -1731,8 +1741,8 @@ impl<'a> Parser<'a> {
                 Keyword::FAIL,
                 Keyword::IGNORE,
             ],
-            "https://www.sqlite.org/lang_insert.html",
-            "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after INSERT OR",
+            doc,
+            note,
         )?))
     }
 
@@ -1871,6 +1881,122 @@ impl<'a> Parser<'a> {
         None
     }
 
+    /// https://www.sqlite.org/lang_update.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn update_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let location = Location::from(self.cur());
+
+        // UPDATE [OR <conflict-algorithm>] <qualified-table-name>
+        self.consume_keyword(Keyword::UPDATE);
+        let conflict = self.statement_conflict_algorithm("UPDATE")?;
+        let target = self.qualified_table_name()?;
+
+        // SET <column-name> = <expr> | SET (<column-name>, ...) = <expr>
+        self.consume_keyword(Keyword::SET);
+        let assignments = self.update_assignment_list()?;
+
+        // FROM <table-or-subquery>, ...
+        if self.is_keyword(Keyword::FROM) {
+            return self.reject_update_from_clause();
+        }
+
+        // WHERE <expr>
+        let where_expr = self.optional_where_clause()?;
+
+        // RETURNING <result-column>, ...
+        let returning = self.optional_returning_clause()?;
+
+        // ORDER BY <ordering-term>, ...
+        let order_by = self.optional_order_by_clause()?;
+
+        // LIMIT <expr> [OFFSET <expr> | , <expr>]
+        let limit = self.optional_limit_offset_clause()?;
+
+        self.expect_end("https://www.sqlite.org/lang_update.html");
+
+        some_box!(nodes::Update {
+            location,
+            conflict,
+            target,
+            assignments,
+            where_expr,
+            returning,
+            order_by,
+            limit,
+        })
+    }
+
+    /// https://www.sqlite.org/syntax/update-stmt.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn update_assignment_list(&mut self) -> Option<Vec<nodes::UpdateAssignment>> {
+        let mut assignments = vec![];
+        loop {
+            // <column-name> = <expr> | (<column-name>, ...) = <expr>
+            assignments.push(self.update_assignment()?);
+
+            // , <column-name> = <expr>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon)
+                    || self.is_keyword(Keyword::FROM)
+                    || self.is_keyword(Keyword::WHERE)
+                    || self.is_keyword(Keyword::RETURNING)
+                    || self.is_keyword(Keyword::ORDER)
+                    || self.is_keyword(Keyword::LIMIT)
+                {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed UPDATE statement",
+                        "UPDATE assignment list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_update.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        Some(assignments)
+    }
+
+    /// https://www.sqlite.org/syntax/update-stmt.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn update_assignment(&mut self) -> Option<nodes::UpdateAssignment> {
+        // (<column-name>, ...)
+        let columns = if self.consume_if(Type::BraceLeft) {
+            let columns = self.column_name_list("UPDATE assignment")?;
+            self.consume(Type::BraceRight);
+            columns
+        // <column-name>
+        } else {
+            vec![self.consume_ident("https://www.sqlite.org/lang_update.html", "column_name")?]
+        };
+
+        // = <expr>
+        self.consume(Type::Equal);
+        let expr = self.expr()?;
+
+        Some(nodes::UpdateAssignment { columns, expr })
+    }
+
+    /// https://www.sqlite.org/lang_update.html#upfrom
+    #[cfg_attr(feature = "trace", trace)]
+    fn reject_update_from_clause(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let src = Location::from(self.cur());
+        self.push_doc_err(
+            "Unimplemented",
+            "UPDATE FROM is not yet supported",
+            src,
+            Rule::Unimplemented,
+            "https://www.sqlite.org/lang_update.html#upfrom",
+        );
+        self.skip_until_semicolon_or_eof();
+        None
+    }
+
     /// https://www.sqlite.org/lang_delete.html
     #[cfg_attr(feature = "trace", trace)]
     fn delete_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
@@ -1882,33 +2008,16 @@ impl<'a> Parser<'a> {
         let target = self.qualified_table_name()?;
 
         // WHERE <expr>
-        let where_expr = if self.consume_if_keyword(Keyword::WHERE) {
-            Some(self.expr()?)
-        } else {
-            None
-        };
+        let where_expr = self.optional_where_clause()?;
 
         // RETURNING <result-column>, ...
-        let returning = if self.consume_if_keyword(Keyword::RETURNING) {
-            self.returning_clause()?
-        } else {
-            vec![]
-        };
+        let returning = self.optional_returning_clause()?;
 
         // ORDER BY <ordering-term>, ...
-        let order_by = if self.consume_if_keyword(Keyword::ORDER) {
-            self.consume_keyword(Keyword::BY);
-            self.ordering_term_list()?
-        } else {
-            vec![]
-        };
+        let order_by = self.optional_order_by_clause()?;
 
         // LIMIT <expr> [OFFSET <expr> | , <expr>]
-        let limit = if self.consume_if_keyword(Keyword::LIMIT) {
-            Some(self.delete_limit_clause()?)
-        } else {
-            None
-        };
+        let limit = self.optional_limit_offset_clause()?;
 
         self.expect_end("https://www.sqlite.org/lang_delete.html");
 
@@ -2013,6 +2122,47 @@ impl<'a> Parser<'a> {
         };
 
         Some(nodes::QualifiedTableName { name, alias, index })
+    }
+
+    /// https://www.sqlite.org/syntax/expr.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn optional_where_clause(&mut self) -> Option<Option<nodes::Expr>> {
+        if self.consume_if_keyword(Keyword::WHERE) {
+            Some(Some(self.expr()?))
+        } else {
+            Some(None)
+        }
+    }
+
+    /// https://www.sqlite.org/syntax/returning-clause.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn optional_returning_clause(&mut self) -> Option<Vec<nodes::ReturningColumn>> {
+        if self.consume_if_keyword(Keyword::RETURNING) {
+            self.returning_clause()
+        } else {
+            Some(vec![])
+        }
+    }
+
+    /// https://www.sqlite.org/syntax/ordering-term.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn optional_order_by_clause(&mut self) -> Option<Vec<nodes::OrderingTerm>> {
+        if self.consume_if_keyword(Keyword::ORDER) {
+            self.consume_keyword(Keyword::BY);
+            self.ordering_term_list()
+        } else {
+            Some(vec![])
+        }
+    }
+
+    /// https://www.sqlite.org/syntax/delete-stmt-limited.html and https://www.sqlite.org/syntax/update-stmt-limited.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn optional_limit_offset_clause(&mut self) -> Option<Option<nodes::LimitOffset>> {
+        if self.consume_if_keyword(Keyword::LIMIT) {
+            Some(Some(self.limit_offset_clause()?))
+        } else {
+            Some(None)
+        }
     }
 
     /// https://www.sqlite.org/syntax/returning-clause.html
@@ -2133,9 +2283,9 @@ impl<'a> Parser<'a> {
         Some(nodes::OrderingTerm { expr, order, nulls })
     }
 
-    /// https://www.sqlite.org/syntax/delete-stmt-limited.html
+    /// https://www.sqlite.org/syntax/delete-stmt-limited.html and https://www.sqlite.org/syntax/update-stmt-limited.html
     #[cfg_attr(feature = "trace", trace)]
-    fn delete_limit_clause(&mut self) -> Option<nodes::DeleteLimit> {
+    fn limit_offset_clause(&mut self) -> Option<nodes::LimitOffset> {
         // LIMIT <expr>
         let limit = self.expr()?;
 
@@ -2148,7 +2298,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        Some(nodes::DeleteLimit { limit, offset })
+        Some(nodes::LimitOffset { limit, offset })
     }
 
     /// https://www.sqlite.org/syntax/detach-stmt.html

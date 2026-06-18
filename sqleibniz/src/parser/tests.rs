@@ -41,9 +41,9 @@ macro_rules! test_group_pass_assert {
 mod should_pass {
     use crate::{
         parser::nodes::{
-            Alter, ColumnConstraint, ColumnDef, Delete, DeleteLimit, Expr, Insert, InsertSource,
+            Alter, ColumnConstraint, ColumnDef, Delete, Expr, Insert, InsertSource, LimitOffset,
             OrderingTerm, QualifiedTableIndex, QualifiedTableName, ReturningColumn,
-            SchemaTableContainer,
+            SchemaTableContainer, Update, UpdateAssignment,
         },
         types::{Keyword, Token, Type, storage::SqliteStorageClass},
     };
@@ -126,7 +126,7 @@ mod should_pass {
         where_expr: Option<Expr>,
         returning: Vec<ReturningColumn>,
         order_by: Vec<OrderingTerm>,
-        limit: Option<DeleteLimit>,
+        limit: Option<LimitOffset>,
     ) -> Vec<Delete> {
         vec![Delete::new(target, where_expr, returning, order_by, limit)]
     }
@@ -139,6 +139,33 @@ mod should_pass {
         returning: Vec<ReturningColumn>,
     ) -> Vec<Insert> {
         vec![Insert::new(conflict, target, columns, source, returning)]
+    }
+
+    fn update(
+        conflict: Option<Keyword>,
+        target: QualifiedTableName,
+        assignments: Vec<UpdateAssignment>,
+        where_expr: Option<Expr>,
+        returning: Vec<ReturningColumn>,
+        order_by: Vec<OrderingTerm>,
+        limit: Option<LimitOffset>,
+    ) -> Vec<Update> {
+        vec![Update::new(
+            conflict,
+            target,
+            assignments,
+            where_expr,
+            returning,
+            order_by,
+            limit,
+        )]
+    }
+
+    fn assignment(columns: Vec<&str>, expr: Expr) -> UpdateAssignment {
+        UpdateAssignment {
+            columns: columns.into_iter().map(String::from).collect(),
+            expr,
+        }
     }
 
     test_group_pass_assert! {
@@ -331,7 +358,7 @@ mod should_pass {
                 OrderingTerm { expr: col("created_at"), order: Some(Keyword::DESC), nulls: Some(Keyword::LAST) },
                 OrderingTerm { expr: col("id"), order: Some(Keyword::ASC), nulls: None },
             ],
-            Some(DeleteLimit { limit: num(5.0), offset: Some(num(2.0)) }),
+            Some(LimitOffset { limit: num(5.0), offset: Some(num(2.0)) }),
         ),
 
         delete_limit_comma_offset:
@@ -340,7 +367,7 @@ mod should_pass {
             None,
             vec![],
             vec![],
-            Some(DeleteLimit { limit: num(5.0), offset: Some(num(2.0)) }),
+            Some(LimitOffset { limit: num(5.0), offset: Some(num(2.0)) }),
         )
     }
 
@@ -396,6 +423,96 @@ mod should_pass {
                 ReturningColumn::Star,
                 ReturningColumn::Expr { expr: col("id"), alias: Some("inserted_id".into()) },
             ],
+        )
+    }
+
+    test_group_pass_assert! {
+        update_stmt,
+
+        update_single_assignment:
+        r"UPDATE users SET name = 'Ada';"=update(
+            None,
+            qtable(SchemaTableContainer::Table("users".into())),
+            vec![assignment(vec!["name"], string("Ada"))],
+            None,
+            vec![],
+            vec![],
+            None,
+        ),
+
+        update_or_fail_schema_table_where:
+        r"UPDATE OR FAIL main.users SET name = 'Ada' WHERE id = 1;"=update(
+            Some(Keyword::FAIL),
+            qtable(SchemaTableContainer::SchemaAndTable { schema: "main".into(), table: "users".into() }),
+            vec![assignment(vec!["name"], string("Ada"))],
+            Some(op("=", vec![col("id"), num(1.0)])),
+            vec![],
+            vec![],
+            None,
+        ),
+
+        update_alias_not_indexed:
+        r"UPDATE users AS u NOT INDEXED SET name = 'Ada' WHERE u.id = 1;"=update(
+            None,
+            QualifiedTableName {
+                name: SchemaTableContainer::Table("users".into()),
+                alias: Some("u".into()),
+                index: Some(QualifiedTableIndex::NotIndexed),
+            },
+            vec![assignment(vec!["name"], string("Ada"))],
+            Some(op("=", vec![
+                Expr::new(None, None, None, Some("u".into()), Some("id".into()), None, None, vec![]),
+                num(1.0),
+            ])),
+            vec![],
+            vec![],
+            None,
+        ),
+
+        update_indexed_multi_assignment:
+        r"UPDATE users INDEXED BY idx_users_id SET name = 'Ada', active = true;"=update(
+            None,
+            QualifiedTableName {
+                name: SchemaTableContainer::Table("users".into()),
+                alias: None,
+                index: Some(QualifiedTableIndex::IndexedBy("idx_users_id".into())),
+            },
+            vec![
+                assignment(vec!["name"], string("Ada")),
+                assignment(vec!["active"], lit(Type::Boolean(true))),
+            ],
+            None,
+            vec![],
+            vec![],
+            None,
+        ),
+
+        update_column_list_assignment:
+        r"UPDATE users SET (name, email) = user_defaults(id);"=update(
+            None,
+            qtable(SchemaTableContainer::Table("users".into())),
+            vec![assignment(
+                vec!["name", "email"],
+                Expr::new(None, None, None, None, None, Some("user_defaults".into()), None, vec![col("id")]),
+            )],
+            None,
+            vec![],
+            vec![],
+            None,
+        ),
+
+        update_returning_order_limit:
+        r"UPDATE users SET active = false WHERE last_seen < 10 RETURNING *, id AS updated_id ORDER BY last_seen DESC LIMIT 5 OFFSET 2;"=update(
+            None,
+            qtable(SchemaTableContainer::Table("users".into())),
+            vec![assignment(vec!["active"], lit(Type::Boolean(false)))],
+            Some(op("<", vec![col("last_seen"), num(10.0)])),
+            vec![
+                ReturningColumn::Star,
+                ReturningColumn::Expr { expr: col("id"), alias: Some("updated_id".into()) },
+            ],
+            vec![OrderingTerm { expr: col("last_seen"), order: Some(Keyword::DESC), nulls: None }],
+            Some(LimitOffset { limit: num(5.0), offset: Some(num(2.0)) }),
         )
     }
 
@@ -2033,6 +2150,16 @@ mod should_fail {
         insert_with_select_unimplemented: "WITH stale AS (SELECT 1) INSERT INTO users VALUES (1);" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
         insert_select_unimplemented: "INSERT INTO users SELECT id FROM old_users;" => Rule::Unimplemented, "INSERT ... <select-stmt> is not yet supported",
         insert_upsert_unimplemented: "INSERT INTO users VALUES (1) ON CONFLICT(id) DO NOTHING;" => Rule::Unimplemented, "INSERT upsert-clause is not yet supported",
+        update_missing_table: "UPDATE SET name = 'Ada';" => Rule::Syntax, "expected either schema_name.table or table",
+        update_missing_set: "UPDATE users name = 'Ada';" => Rule::Syntax, "Wanted Keyword(SET)",
+        update_bad_conflict_algorithm: "UPDATE OR NO users SET name = 'Ada';" => Rule::Syntax, "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after UPDATE OR",
+        update_assignment_missing_column: "UPDATE users SET = 'Ada';" => Rule::Syntax, "Expected Ident(<column_name>)",
+        update_assignment_missing_equal: "UPDATE users SET name 'Ada';" => Rule::Syntax, "Wanted Equal",
+        update_assignment_trailing_comma: "UPDATE users SET name = 'Ada', WHERE id = 1;" => Rule::Syntax, "UPDATE assignment list has a trailing comma",
+        update_column_list_empty: "UPDATE users SET () = user_defaults();" => Rule::Syntax, "requires at least one column name",
+        update_column_list_trailing_comma: "UPDATE users SET (name,) = user_defaults();" => Rule::Syntax, "column list has a trailing comma",
+        update_from_unimplemented: "UPDATE users SET name = old_users.name FROM old_users WHERE users.id = old_users.id;" => Rule::Unimplemented, "UPDATE FROM is not yet supported",
+        update_with_select_unimplemented: "WITH stale AS (SELECT 1) UPDATE users SET name = 'Ada';" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
 
         // sql_stmt dispatch
         unknown_keyword_suggestion: "usrs;" => Rule::UnknownKeyword, "did you mean one of",

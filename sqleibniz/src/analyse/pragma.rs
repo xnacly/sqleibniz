@@ -7,17 +7,116 @@ use crate::{
 pub fn pragma(file: &str, pragma: &Pragma) -> Vec<Error> {
     let name = pragma_name(pragma);
 
-    PRAGMAS
-        .iter()
-        .find(|entry| entry.name == name)
-        .and_then(|entry| entry.analyse(file, pragma))
-        .into_iter()
-        .collect()
+    let Some(entry) = PRAGMAS.iter().find(|entry| entry.name == name) else {
+        return Vec::new();
+    };
+
+    let mut diagnostics = Vec::new();
+    if let Some(error) = entry.validate(file, pragma) {
+        diagnostics.push(error);
+        return diagnostics;
+    }
+
+    diagnostics.extend(entry.analyse(file, pragma));
+    diagnostics
 }
 
 struct PragmaEntry {
     name: &'static str,
+    doc_url: &'static str,
+    forms: PragmaForms,
+    value: PragmaValue,
     analysis: PragmaAnalysis,
+}
+
+#[derive(Clone, Copy)]
+struct PragmaForms(u8);
+
+impl PragmaForms {
+    const QUERY: u8 = 1;
+    const ASSIGN: u8 = 1 << 1;
+    const CALL: u8 = 1 << 2;
+
+    const fn new(query: bool, assign: bool, call: bool) -> Self {
+        Self(
+            (query as u8 * Self::QUERY) | (assign as u8 * Self::ASSIGN) | (call as u8 * Self::CALL),
+        )
+    }
+
+    fn allows_query(self) -> bool {
+        self.0 & Self::QUERY != 0
+    }
+
+    fn allows_assign(self) -> bool {
+        self.0 & Self::ASSIGN != 0
+    }
+
+    fn allows_call(self) -> bool {
+        self.0 & Self::CALL != 0
+    }
+
+    fn description(self) -> &'static str {
+        match (
+            self.allows_query(),
+            self.allows_assign(),
+            self.allows_call(),
+        ) {
+            (true, false, false) => "query form",
+            (false, true, false) => "assignment form",
+            (false, false, true) => "call form",
+            (true, true, false) => "query or assignment form",
+            (true, false, true) => "query or call form",
+            (false, true, true) => "assignment or call form",
+            (true, true, true) => "query, assignment or call form",
+            (false, false, false) => "no invocation form",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PragmaValue {
+    None,
+    Boolean,
+    Integer,
+    Name,
+    Text,
+    BooleanOrInteger,
+    BooleanOrNamed(&'static [&'static str]),
+    IntegerOrNamed(&'static [&'static str]),
+    IntegerOrName,
+    Named(&'static [&'static str]),
+}
+
+impl PragmaValue {
+    fn accepts(self, token: &Token) -> bool {
+        match self {
+            Self::None => false,
+            Self::Boolean => is_boolean(token),
+            Self::Integer => is_integer(token),
+            Self::Name => is_name(token),
+            Self::Text => matches!(token.ttype, Type::String(_)) || is_name(token),
+            Self::BooleanOrInteger => is_boolean(token) || is_integer(token),
+            Self::BooleanOrNamed(options) => is_boolean(token) || is_named(token, options),
+            Self::IntegerOrNamed(options) => is_integer(token) || is_named(token, options),
+            Self::IntegerOrName => is_integer(token) || is_name(token),
+            Self::Named(options) => is_named(token, options),
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::None => "no value",
+            Self::Boolean => "a boolean value",
+            Self::Integer => "an integer value",
+            Self::Name => "an identifier or string name",
+            Self::Text => "a string or identifier value",
+            Self::BooleanOrInteger => "a boolean or integer value",
+            Self::BooleanOrNamed(_) => "a boolean value or documented named option",
+            Self::IntegerOrNamed(_) => "an integer value or documented named option",
+            Self::IntegerOrName => "an integer value, identifier or string name",
+            Self::Named(_) => "a documented named option",
+        }
+    }
 }
 
 enum PragmaAnalysis {
@@ -27,353 +126,413 @@ enum PragmaAnalysis {
         note: &'static str,
     },
     Check {
-        diagnostic: fn(&str, &Pragma) -> Option<Error>,
+        diagnostic: fn(&str, &'static str, &Pragma) -> Option<Error>,
         #[cfg(test)]
         diagnostic_value: Type,
     },
 }
 
 impl PragmaEntry {
+    fn validate(&self, file: &str, pragma: &Pragma) -> Option<Error> {
+        match &pragma.invocation {
+            PragmaInvocation::Query if !self.forms.allows_query() => {
+                Some(self.bad_form(file, pragma))
+            }
+            PragmaInvocation::Assign { value } if !self.forms.allows_assign() => {
+                let _ = value;
+                Some(self.bad_form(file, pragma))
+            }
+            PragmaInvocation::Call { value } if !self.forms.allows_call() => {
+                let _ = value;
+                Some(self.bad_form(file, pragma))
+            }
+            PragmaInvocation::Assign { value } | PragmaInvocation::Call { value }
+                if !self.value.accepts(value) =>
+            {
+                Some(self.bad_value(file, pragma, value))
+            }
+            PragmaInvocation::Query => None,
+            PragmaInvocation::Assign { .. } | PragmaInvocation::Call { .. } => None,
+        }
+    }
+
     fn analyse(&self, file: &str, pragma: &Pragma) -> Option<Error> {
         match self.analysis {
             PragmaAnalysis::None => None,
             PragmaAnalysis::Deprecated { msg, note } => Some(
                 Error::new(file, pragma.location, Rule::Quirk, msg, note)
-                    .with_doc_url("https://www.sqlite.org/pragma.html"),
+                    .with_doc_url(self.doc_url),
             ),
-            PragmaAnalysis::Check { diagnostic, .. } => diagnostic(file, pragma),
+            PragmaAnalysis::Check { diagnostic, .. } => diagnostic(file, self.doc_url, pragma),
         }
+    }
+
+    fn bad_form(&self, file: &str, pragma: &Pragma) -> Error {
+        Error::new(
+            file,
+            pragma.location,
+            Rule::Syntax,
+            format!("PRAGMA {} uses an unsupported invocation form", self.name),
+            format!(
+                "SQLite documents PRAGMA {} with {}; this invocation does not match that form.",
+                self.name,
+                self.forms.description()
+            ),
+        )
+        .with_doc_url(self.doc_url)
+    }
+
+    fn bad_value(&self, file: &str, pragma: &Pragma, value: &Token) -> Error {
+        Error::new(
+            file,
+            pragma.location,
+            Rule::Syntax,
+            format!("PRAGMA {} has an unsupported value", self.name),
+            format!(
+                "SQLite documents PRAGMA {} with {}; got {:?}.",
+                self.name,
+                self.value.description(),
+                value.ttype
+            ),
+        )
+        .with_doc_url(self.doc_url)
     }
 }
 
+macro_rules! forms {
+    (query) => {
+        PragmaForms::new(true, false, false)
+    };
+    (call) => {
+        PragmaForms::new(false, false, true)
+    };
+    (query, assign) => {
+        PragmaForms::new(true, true, false)
+    };
+    (query, call) => {
+        PragmaForms::new(true, false, true)
+    };
+    (query, assign, call) => {
+        PragmaForms::new(true, true, true)
+    };
+}
+
+macro_rules! pragma_entry {
+    ($name:literal, $forms:expr, $value:expr) => {
+        PragmaEntry {
+            name: $name,
+            doc_url: concat!("https://www.sqlite.org/pragma.html#pragma_", $name),
+            forms: $forms,
+            value: $value,
+            analysis: PragmaAnalysis::None,
+        }
+    };
+    ($name:literal, $forms:expr, $value:expr, deprecated($msg:literal, $note:literal)) => {
+        PragmaEntry {
+            name: $name,
+            doc_url: concat!("https://www.sqlite.org/pragma.html#pragma_", $name),
+            forms: $forms,
+            value: $value,
+            analysis: PragmaAnalysis::Deprecated {
+                msg: $msg,
+                note: $note,
+            },
+        }
+    };
+    ($name:literal, $forms:expr, $value:expr, check($diagnostic:path, $diagnostic_value:expr)) => {
+        PragmaEntry {
+            name: $name,
+            doc_url: concat!("https://www.sqlite.org/pragma.html#pragma_", $name),
+            forms: $forms,
+            value: $value,
+            analysis: PragmaAnalysis::Check {
+                diagnostic: $diagnostic,
+                #[cfg(test)]
+                diagnostic_value: $diagnostic_value,
+            },
+        }
+    };
+}
+
+const AUTO_VACUUM_MODES: &[&str] = &["0", "1", "2", "full", "incremental", "none"];
+const JOURNAL_MODES: &[&str] = &["delete", "memory", "off", "persist", "truncate", "wal"];
+const LOCKING_MODES: &[&str] = &["exclusive", "normal"];
+const SECURE_DELETE_MODES: &[&str] = &["fast"];
+const SYNCHRONOUS_MODES: &[&str] = &["extra", "full", "normal", "off"];
+const TEMP_STORE_MODES: &[&str] = &["default", "file", "memory"];
+const WAL_CHECKPOINT_MODES: &[&str] = &["full", "passive", "restart", "truncate"];
+
 const PRAGMAS: &[PragmaEntry] = &[
-    PragmaEntry {
-        name: "analysis_limit",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "application_id",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "auto_vacuum",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "automatic_index",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "busy_timeout",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "cache_size",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "cache_spill",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "case_sensitive_like",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA case_sensitive_like is deprecated",
-            note: "SQLite documents case_sensitive_like as deprecated. Avoid new use because changing LIKE semantics can make existing schema objects appear corrupt until the setting is restored or indexes are rebuilt.",
-        },
-    },
-    PragmaEntry {
-        name: "cell_size_check",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "checkpoint_fullfsync",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "collation_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "compile_options",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "count_changes",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA count_changes is deprecated",
-            note: "SQLite documents count_changes as deprecated. Avoid new use; sqlite3_changes() and sqlite3_total_changes() are the supported interfaces.",
-        },
-    },
-    PragmaEntry {
-        name: "data_store_directory",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA data_store_directory is deprecated",
-            note: "SQLite documents data_store_directory as deprecated and not threadsafe. Avoid changing process-global SQLite directory state from SQL.",
-        },
-    },
-    PragmaEntry {
-        name: "data_version",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "database_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "default_cache_size",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA default_cache_size is deprecated",
-            note: "SQLite documents default_cache_size as deprecated. Prefer PRAGMA cache_size for connection-local cache tuning.",
-        },
-    },
-    PragmaEntry {
-        name: "defer_foreign_keys",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "empty_result_callbacks",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA empty_result_callbacks is deprecated",
-            note: "SQLite documents empty_result_callbacks as deprecated. Avoid new use.",
-        },
-    },
-    PragmaEntry {
-        name: "encoding",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "foreign_key_check",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "foreign_key_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "foreign_keys",
-        analysis: PragmaAnalysis::Check {
-            diagnostic: foreign_keys,
-            #[cfg(test)]
-            diagnostic_value: Type::Boolean(false),
-        },
-    },
-    PragmaEntry {
-        name: "freelist_count",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "full_column_names",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA full_column_names is deprecated",
-            note: "SQLite documents full_column_names as deprecated. Avoid relying on deprecated result-column naming controls.",
-        },
-    },
-    PragmaEntry {
-        name: "fullfsync",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "function_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "hard_heap_limit",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "ignore_check_constraints",
-        analysis: PragmaAnalysis::Check {
-            diagnostic: ignore_check_constraints,
-            #[cfg(test)]
-            diagnostic_value: Type::Boolean(true),
-        },
-    },
-    PragmaEntry {
-        name: "incremental_vacuum",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "index_info",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "index_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "index_xinfo",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "integrity_check",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "journal_mode",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "journal_size_limit",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "legacy_alter_table",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "locking_mode",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "max_page_count",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "mmap_size",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "module_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "optimize",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "page_count",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "page_size",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "parser_trace",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "pragma_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "query_only",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "quick_check",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "read_uncommitted",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "recursive_triggers",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "reverse_unordered_selects",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "schema_version",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "secure_delete",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "short_column_names",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA short_column_names is deprecated",
-            note: "SQLite documents short_column_names as deprecated. Avoid relying on deprecated result-column naming controls.",
-        },
-    },
-    PragmaEntry {
-        name: "shrink_memory",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "soft_heap_limit",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "synchronous",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "table_info",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "table_list",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "table_xinfo",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "temp_store",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "temp_store_directory",
-        analysis: PragmaAnalysis::Deprecated {
-            msg: "PRAGMA temp_store_directory is deprecated",
-            note: "SQLite documents temp_store_directory as deprecated and not threadsafe. Avoid changing process-global SQLite directory state from SQL.",
-        },
-    },
-    PragmaEntry {
-        name: "threads",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "trusted_schema",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "user_version",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "vdbe_addoptrace",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "vdbe_debug",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "vdbe_listing",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "vdbe_trace",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "wal_autocheckpoint",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "wal_checkpoint",
-        analysis: PragmaAnalysis::None,
-    },
-    PragmaEntry {
-        name: "writable_schema",
-        analysis: PragmaAnalysis::Check {
-            diagnostic: writable_schema,
-            #[cfg(test)]
-            diagnostic_value: Type::Boolean(true),
-        },
-    },
+    pragma_entry!(
+        "analysis_limit",
+        forms!(query, assign, call),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "application_id",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "auto_vacuum",
+        forms!(query, assign),
+        PragmaValue::IntegerOrNamed(AUTO_VACUUM_MODES)
+    ),
+    pragma_entry!(
+        "automatic_index",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!("busy_timeout", forms!(query, assign), PragmaValue::Integer),
+    pragma_entry!("cache_size", forms!(query, assign), PragmaValue::Integer),
+    pragma_entry!(
+        "cache_spill",
+        forms!(query, assign),
+        PragmaValue::BooleanOrInteger
+    ),
+    pragma_entry!(
+        "case_sensitive_like",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        deprecated(
+            "PRAGMA case_sensitive_like is deprecated",
+            "SQLite documents case_sensitive_like as deprecated. Avoid new use because changing LIKE semantics can make existing schema objects appear corrupt until the setting is restored or indexes are rebuilt."
+        )
+    ),
+    pragma_entry!(
+        "cell_size_check",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!(
+        "checkpoint_fullfsync",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!("collation_list", forms!(query), PragmaValue::None),
+    pragma_entry!("compile_options", forms!(query), PragmaValue::None),
+    pragma_entry!(
+        "count_changes",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        deprecated(
+            "PRAGMA count_changes is deprecated",
+            "SQLite documents count_changes as deprecated. Avoid new use; sqlite3_changes() and sqlite3_total_changes() are the supported interfaces."
+        )
+    ),
+    pragma_entry!(
+        "data_store_directory",
+        forms!(query, assign),
+        PragmaValue::Text,
+        deprecated(
+            "PRAGMA data_store_directory is deprecated",
+            "SQLite documents data_store_directory as deprecated and not threadsafe. Avoid changing process-global SQLite directory state from SQL."
+        )
+    ),
+    pragma_entry!("data_version", forms!(query), PragmaValue::None),
+    pragma_entry!("database_list", forms!(query), PragmaValue::None),
+    pragma_entry!(
+        "default_cache_size",
+        forms!(query, assign),
+        PragmaValue::Integer,
+        deprecated(
+            "PRAGMA default_cache_size is deprecated",
+            "SQLite documents default_cache_size as deprecated. Prefer PRAGMA cache_size for connection-local cache tuning."
+        )
+    ),
+    pragma_entry!(
+        "defer_foreign_keys",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!(
+        "empty_result_callbacks",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        deprecated(
+            "PRAGMA empty_result_callbacks is deprecated",
+            "SQLite documents empty_result_callbacks as deprecated. Avoid new use."
+        )
+    ),
+    pragma_entry!("encoding", forms!(query, assign), PragmaValue::Text),
+    pragma_entry!("foreign_key_check", forms!(query, call), PragmaValue::Name),
+    pragma_entry!("foreign_key_list", forms!(call), PragmaValue::Name),
+    pragma_entry!(
+        "foreign_keys",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        check(foreign_keys, Type::Boolean(false))
+    ),
+    pragma_entry!("freelist_count", forms!(query), PragmaValue::None),
+    pragma_entry!(
+        "full_column_names",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        deprecated(
+            "PRAGMA full_column_names is deprecated",
+            "SQLite documents full_column_names as deprecated. Avoid relying on deprecated result-column naming controls."
+        )
+    ),
+    pragma_entry!("fullfsync", forms!(query, assign), PragmaValue::Boolean),
+    pragma_entry!("function_list", forms!(query), PragmaValue::None),
+    pragma_entry!(
+        "hard_heap_limit",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "ignore_check_constraints",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        check(ignore_check_constraints, Type::Boolean(true))
+    ),
+    pragma_entry!(
+        "incremental_vacuum",
+        forms!(query, call),
+        PragmaValue::Integer
+    ),
+    pragma_entry!("index_info", forms!(call), PragmaValue::Name),
+    pragma_entry!("index_list", forms!(call), PragmaValue::Name),
+    pragma_entry!("index_xinfo", forms!(call), PragmaValue::Name),
+    pragma_entry!(
+        "integrity_check",
+        forms!(query, call),
+        PragmaValue::IntegerOrName
+    ),
+    pragma_entry!(
+        "journal_mode",
+        forms!(query, assign),
+        PragmaValue::Named(JOURNAL_MODES)
+    ),
+    pragma_entry!(
+        "journal_size_limit",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "legacy_alter_table",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!(
+        "locking_mode",
+        forms!(query, assign),
+        PragmaValue::Named(LOCKING_MODES)
+    ),
+    pragma_entry!(
+        "max_page_count",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!("mmap_size", forms!(query, assign), PragmaValue::Integer),
+    pragma_entry!("module_list", forms!(query), PragmaValue::None),
+    pragma_entry!("optimize", forms!(query, call), PragmaValue::Integer),
+    pragma_entry!("page_count", forms!(query), PragmaValue::None),
+    pragma_entry!("page_size", forms!(query, assign), PragmaValue::Integer),
+    pragma_entry!("parser_trace", forms!(query, assign), PragmaValue::Boolean),
+    pragma_entry!("pragma_list", forms!(query), PragmaValue::None),
+    pragma_entry!("query_only", forms!(query, assign), PragmaValue::Boolean),
+    pragma_entry!(
+        "quick_check",
+        forms!(query, call),
+        PragmaValue::IntegerOrName
+    ),
+    pragma_entry!(
+        "read_uncommitted",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!(
+        "recursive_triggers",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!(
+        "reverse_unordered_selects",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!(
+        "schema_version",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "secure_delete",
+        forms!(query, assign),
+        PragmaValue::BooleanOrNamed(SECURE_DELETE_MODES)
+    ),
+    pragma_entry!(
+        "short_column_names",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        deprecated(
+            "PRAGMA short_column_names is deprecated",
+            "SQLite documents short_column_names as deprecated. Avoid relying on deprecated result-column naming controls."
+        )
+    ),
+    pragma_entry!("shrink_memory", forms!(query), PragmaValue::None),
+    pragma_entry!(
+        "soft_heap_limit",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "synchronous",
+        forms!(query, assign),
+        PragmaValue::IntegerOrNamed(SYNCHRONOUS_MODES)
+    ),
+    pragma_entry!("table_info", forms!(call), PragmaValue::Name),
+    pragma_entry!("table_list", forms!(query, call), PragmaValue::Name),
+    pragma_entry!("table_xinfo", forms!(call), PragmaValue::Name),
+    pragma_entry!(
+        "temp_store",
+        forms!(query, assign),
+        PragmaValue::IntegerOrNamed(TEMP_STORE_MODES)
+    ),
+    pragma_entry!(
+        "temp_store_directory",
+        forms!(query, assign),
+        PragmaValue::Text,
+        deprecated(
+            "PRAGMA temp_store_directory is deprecated",
+            "SQLite documents temp_store_directory as deprecated and not threadsafe. Avoid changing process-global SQLite directory state from SQL."
+        )
+    ),
+    pragma_entry!("threads", forms!(query, assign), PragmaValue::Integer),
+    pragma_entry!(
+        "trusted_schema",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!("user_version", forms!(query, assign), PragmaValue::Integer),
+    pragma_entry!(
+        "vdbe_addoptrace",
+        forms!(query, assign),
+        PragmaValue::Boolean
+    ),
+    pragma_entry!("vdbe_debug", forms!(query, assign), PragmaValue::Boolean),
+    pragma_entry!("vdbe_listing", forms!(query, assign), PragmaValue::Boolean),
+    pragma_entry!("vdbe_trace", forms!(query, assign), PragmaValue::Boolean),
+    pragma_entry!(
+        "wal_autocheckpoint",
+        forms!(query, assign),
+        PragmaValue::Integer
+    ),
+    pragma_entry!(
+        "wal_checkpoint",
+        forms!(query, call),
+        PragmaValue::Named(WAL_CHECKPOINT_MODES)
+    ),
+    pragma_entry!(
+        "writable_schema",
+        forms!(query, assign),
+        PragmaValue::Boolean,
+        check(writable_schema, Type::Boolean(true))
+    ),
 ];
 
-fn foreign_keys(file: &str, pragma: &Pragma) -> Option<Error> {
+fn foreign_keys(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
     if !assigned_or_called_with(pragma, is_off) {
         return None;
     }
@@ -386,11 +545,11 @@ fn foreign_keys(file: &str, pragma: &Pragma) -> Option<Error> {
             "PRAGMA foreign_keys disables foreign key enforcement",
             "SQLite does not enforce foreign key constraints when PRAGMA foreign_keys is OFF. Prefer enabling foreign key enforcement for each connection.",
         )
-        .with_doc_url("https://www.sqlite.org/pragma.html#pragma_foreign_keys"),
+        .with_doc_url(doc_url),
     )
 }
 
-fn ignore_check_constraints(file: &str, pragma: &Pragma) -> Option<Error> {
+fn ignore_check_constraints(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
     if !assigned_or_called_with(pragma, is_on) {
         return None;
     }
@@ -403,11 +562,11 @@ fn ignore_check_constraints(file: &str, pragma: &Pragma) -> Option<Error> {
             "PRAGMA ignore_check_constraints disables CHECK constraints",
             "SQLite skips CHECK constraint enforcement when PRAGMA ignore_check_constraints is enabled. Avoid enabling it outside narrow maintenance scripts.",
         )
-        .with_doc_url("https://www.sqlite.org/pragma.html#pragma_ignore_check_constraints"),
+        .with_doc_url(doc_url),
     )
 }
 
-fn writable_schema(file: &str, pragma: &Pragma) -> Option<Error> {
+fn writable_schema(file: &str, doc_url: &'static str, pragma: &Pragma) -> Option<Error> {
     if !assigned_or_called_with(pragma, is_on) {
         return None;
     }
@@ -420,7 +579,7 @@ fn writable_schema(file: &str, pragma: &Pragma) -> Option<Error> {
             "PRAGMA writable_schema allows direct schema table writes",
             "SQLite warns that misuse of writable_schema can corrupt the database. Avoid enabling it unless you are deliberately performing low-level recovery or migration work.",
         )
-        .with_doc_url("https://www.sqlite.org/pragma.html#pragma_writable_schema"),
+        .with_doc_url(doc_url),
     )
 }
 
@@ -446,6 +605,39 @@ fn is_on(token: &Token) -> bool {
         Type::Keyword(Keyword::ON) => true,
         Type::Ident(value) | Type::String(value) => matches_on(value),
         _ => false,
+    }
+}
+
+fn is_boolean(token: &Token) -> bool {
+    is_on(token) || is_off(token)
+}
+
+fn is_integer(token: &Token) -> bool {
+    matches!(token.ttype, Type::Number(number) if number.fract() == 0.0)
+}
+
+fn is_name(token: &Token) -> bool {
+    matches!(
+        token.ttype,
+        Type::Ident(_) | Type::String(_) | Type::Keyword(_)
+    )
+}
+
+fn is_named(token: &Token, options: &[&str]) -> bool {
+    let Some(value) = token_text(token) else {
+        return false;
+    };
+
+    options
+        .iter()
+        .any(|option| option.eq_ignore_ascii_case(value))
+}
+
+fn token_text(token: &Token) -> Option<&str> {
+    match &token.ttype {
+        Type::Ident(value) | Type::String(value) => Some(value.as_str()),
+        Type::Keyword(keyword) => Some((*keyword).into()),
+        _ => None,
     }
 }
 
@@ -524,6 +716,16 @@ mod tests {
     }
 
     #[test]
+    fn pragma_table_entries_have_specific_doc_urls() {
+        for entry in PRAGMAS {
+            assert_eq!(
+                entry.doc_url,
+                format!("https://www.sqlite.org/pragma.html#pragma_{}", entry.name)
+            );
+        }
+    }
+
+    #[test]
     fn reports_deprecated_pragmas() {
         let diagnostics = pragma(
             "test.sql",
@@ -535,7 +737,49 @@ mod tests {
         assert!(diagnostics[0].note.contains("deprecated"));
         assert_eq!(
             diagnostics[0].doc_url,
-            Some("https://www.sqlite.org/pragma.html")
+            Some("https://www.sqlite.org/pragma.html#pragma_case_sensitive_like")
+        );
+    }
+
+    #[test]
+    fn reports_unsupported_invocation_forms() {
+        let diagnostics = pragma(
+            "test.sql",
+            &pragma_node(
+                "foreign_keys",
+                PragmaInvocation::Call {
+                    value: Token::new(Type::Boolean(true)),
+                },
+            ),
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::Syntax);
+        assert!(diagnostics[0].note.contains("query or assignment form"));
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/pragma.html#pragma_foreign_keys")
+        );
+    }
+
+    #[test]
+    fn reports_unsupported_values() {
+        let diagnostics = pragma(
+            "test.sql",
+            &pragma_node(
+                "foreign_keys",
+                PragmaInvocation::Assign {
+                    value: Token::new(Type::Ident("maybe".into())),
+                },
+            ),
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::Syntax);
+        assert!(diagnostics[0].note.contains("a boolean value"));
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/pragma.html#pragma_foreign_keys")
         );
     }
 
@@ -585,7 +829,7 @@ mod tests {
             "test.sql",
             &pragma_node(
                 "foreign_keys",
-                PragmaInvocation::Call {
+                PragmaInvocation::Assign {
                     value: Token::new(Type::Boolean(true)),
                 },
             ),

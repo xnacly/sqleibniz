@@ -1639,7 +1639,11 @@ mod should_analyze {
         ignore_check_constraints_enabled:
             "PRAGMA ignore_check_constraints = 1;" => Rule::Quirk, "CHECK constraint enforcement",
         writable_schema_enabled:
-            "PRAGMA writable_schema = ON;" => Rule::Quirk, "corrupt the database"
+            "PRAGMA writable_schema = ON;" => Rule::Quirk, "corrupt the database",
+        pragma_unsupported_documented_form:
+            "PRAGMA foreign_keys(true);" => Rule::Syntax, "query or assignment form",
+        pragma_unsupported_documented_value:
+            "PRAGMA foreign_keys = maybe;" => Rule::Syntax, "a boolean value"
     }
 
     test_group_analysis_pass! {

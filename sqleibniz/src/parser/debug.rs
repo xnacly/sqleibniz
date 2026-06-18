@@ -93,6 +93,32 @@ impl FieldSerializable for DeleteLimit {
     }
 }
 
+impl FieldSerializable for InsertSource {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        match self {
+            InsertSource::DefaultValues => serde_json::json!({ "default_values": true }),
+            InsertSource::Values(rows) => serde_json::Value::Array(
+                rows.iter()
+                    .map(|row| {
+                        serde_json::Value::Array(
+                            row.iter().map(|expr| expr.as_serializable()).collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl FieldHookContexts for InsertSource {
+    fn field_hook_contexts(&self) -> Vec<HookContext> {
+        match self {
+            InsertSource::DefaultValues => vec![],
+            InsertSource::Values(rows) => rows.field_hook_contexts(),
+        }
+    }
+}
+
 impl FieldSerializable for ColumnConstraint {
     fn field_as_serializable(&self) -> serde_json::Value {
         let name = match self {

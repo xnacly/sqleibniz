@@ -442,7 +442,9 @@ impl<'a> Parser<'a> {
             Type::Keyword(Keyword::SAVEPOINT) => self.savepoint_stmt(),
             Type::Keyword(Keyword::DROP) => self.drop_stmt(),
             Type::Keyword(Keyword::ANALYZE) => self.analyze_stmt(),
-            Type::Keyword(Keyword::DELETE) | Type::Keyword(Keyword::WITH) => self.delete_stmt(),
+            Type::Keyword(Keyword::INSERT) => self.insert_stmt(),
+            Type::Keyword(Keyword::DELETE) => self.delete_stmt(),
+            Type::Keyword(Keyword::WITH) => self.with_stmt(),
             Type::Keyword(Keyword::DETACH) => self.detach_stmt(),
             Type::Keyword(Keyword::ROLLBACK) => self.rollback_stmt(),
             Type::Keyword(Keyword::COMMIT) | Type::Keyword(Keyword::END) => self.commit_stmt(),
@@ -1626,17 +1628,253 @@ impl<'a> Parser<'a> {
         some_box!(a)
     }
 
+    /// https://www.sqlite.org/syntax/common-table-expression.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn with_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        // WITH [RECURSIVE] <common-table-expression>, ...
+        // CTE bodies require select-stmt support. Validate the envelope far enough to produce a
+        // precise unsupported diagnostic for the body instead of routing WITH to a statement parser.
+        self.consume_keyword(Keyword::WITH);
+        self.consume_if_keyword(Keyword::RECURSIVE);
+
+        loop {
+            // <common-table-expression>
+            self.common_table_expression()?;
+
+            // , <common-table-expression>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon)
+                    || self.is_keyword(Keyword::DELETE)
+                    || self.is_keyword(Keyword::INSERT)
+                    || self.is_keyword(Keyword::SELECT)
+                    || self.is_keyword(Keyword::UPDATE)
+                {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed WITH clause",
+                        "WITH common table expression list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/syntax/common-table-expression.html",
+                    );
+                    return None;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        None
+    }
+
+    /// https://www.sqlite.org/lang_insert.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn insert_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let location = Location::from(self.cur());
+
+        // INSERT [OR <conflict-algorithm>] INTO <schema-name.table-name|table-name>
+        self.consume_keyword(Keyword::INSERT);
+        let conflict = self.insert_conflict_algorithm()?;
+        self.consume_keyword(Keyword::INTO);
+        let target = self.schema_table_container(Some("table"))?;
+
+        // (<column-name>, ...)
+        let columns = if self.consume_if(Type::BraceLeft) {
+            let columns = self.column_name_list("INSERT")?;
+            self.consume(Type::BraceRight);
+            columns
+        } else {
+            vec![]
+        };
+
+        // DEFAULT VALUES | VALUES (<expr>, ...), ... | <select-stmt>
+        let source = self.insert_source()?;
+
+        // ON CONFLICT ... DO ...
+        if self.is_keyword(Keyword::ON) {
+            return self.reject_insert_upsert_clause();
+        }
+
+        // RETURNING <result-column>, ...
+        let returning = if self.consume_if_keyword(Keyword::RETURNING) {
+            self.returning_clause()?
+        } else {
+            vec![]
+        };
+
+        self.expect_end("https://www.sqlite.org/lang_insert.html");
+
+        some_box!(nodes::Insert {
+            location,
+            conflict,
+            target,
+            columns,
+            source,
+            returning,
+        })
+    }
+
+    /// https://www.sqlite.org/syntax/insert-stmt.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn insert_conflict_algorithm(&mut self) -> Option<Option<Keyword>> {
+        // OR ROLLBACK | OR ABORT | OR REPLACE | OR FAIL | OR IGNORE
+        if !self.consume_if_keyword(Keyword::OR) {
+            return Some(None);
+        }
+
+        Some(Some(self.consume_required_keyword(
+            &[
+                Keyword::ROLLBACK,
+                Keyword::ABORT,
+                Keyword::REPLACE,
+                Keyword::FAIL,
+                Keyword::IGNORE,
+            ],
+            "https://www.sqlite.org/lang_insert.html",
+            "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after INSERT OR",
+        )?))
+    }
+
+    /// https://www.sqlite.org/lang_insert.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn insert_source(&mut self) -> Option<nodes::InsertSource> {
+        // DEFAULT VALUES
+        if self.consume_if_keyword(Keyword::DEFAULT) {
+            self.consume_keyword(Keyword::VALUES);
+            return Some(nodes::InsertSource::DefaultValues);
+        }
+
+        // VALUES (<expr>, ...), ...
+        if self.consume_if_keyword(Keyword::VALUES) {
+            return Some(nodes::InsertSource::Values(self.insert_values_rows()?));
+        }
+
+        // <select-stmt>
+        if self.is_keyword(Keyword::SELECT) {
+            let src = Location::from(self.cur());
+            self.push_doc_err(
+                "Unimplemented",
+                "INSERT ... <select-stmt> is not yet supported",
+                src,
+                Rule::Unimplemented,
+                "https://www.sqlite.org/lang_select.html",
+            );
+            self.skip_until_semicolon_or_eof();
+            return None;
+        }
+
+        let src = Location::from(self.cur());
+        self.push_doc_err(
+            "Malformed INSERT statement",
+            format!(
+                "INSERT expected DEFAULT VALUES, VALUES or select-stmt, got {:?}",
+                self.cur().ttype
+            ),
+            src,
+            Rule::Syntax,
+            "https://www.sqlite.org/lang_insert.html",
+        );
+        self.advance();
+        None
+    }
+
+    /// https://www.sqlite.org/syntax/expr.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn insert_values_rows(&mut self) -> Option<Vec<Vec<nodes::Expr>>> {
+        let mut rows = vec![];
+        loop {
+            // (<expr>, ...)
+            rows.push(self.insert_values_row()?);
+
+            // , (<expr>, ...)
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::Semicolon) || self.is_keyword(Keyword::RETURNING) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed INSERT statement",
+                        "INSERT VALUES row list has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_insert.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        Some(rows)
+    }
+
+    /// https://www.sqlite.org/syntax/expr.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn insert_values_row(&mut self) -> Option<Vec<nodes::Expr>> {
+        // (<expr>, ...)
+        self.consume(Type::BraceLeft);
+        let mut values = vec![];
+
+        loop {
+            if self.is(Type::BraceRight) {
+                if values.is_empty() {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed INSERT statement",
+                        "INSERT VALUES row requires at least one expression",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_insert.html",
+                    );
+                }
+                break;
+            }
+
+            values.push(self.expr()?);
+
+            // , <expr>
+            if self.consume_if(Type::Comma) {
+                if self.is(Type::BraceRight) {
+                    let src = Location::from(self.cur());
+                    self.push_doc_err(
+                        "Malformed INSERT statement",
+                        "INSERT VALUES row has a trailing comma",
+                        src,
+                        Rule::Syntax,
+                        "https://www.sqlite.org/lang_insert.html",
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        self.consume(Type::BraceRight);
+        Some(values)
+    }
+
+    /// https://www.sqlite.org/lang_upsert.html
+    #[cfg_attr(feature = "trace", trace)]
+    fn reject_insert_upsert_clause(&mut self) -> Option<Box<dyn nodes::Node>> {
+        let src = Location::from(self.cur());
+        self.push_doc_err(
+            "Unimplemented",
+            "INSERT upsert-clause is not yet supported",
+            src,
+            Rule::Unimplemented,
+            "https://www.sqlite.org/lang_upsert.html",
+        );
+        self.skip_until_semicolon_or_eof();
+        None
+    }
+
     /// https://www.sqlite.org/lang_delete.html
     #[cfg_attr(feature = "trace", trace)]
     fn delete_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
-
-        // WITH <common-table-expression>, ...
-        // Common table expressions require SELECT support, so this branch currently validates the
-        // envelope only far enough to report SELECT as explicitly unimplemented.
-        if self.consume_if_keyword(Keyword::WITH) {
-            self.with_clause_before_delete()?;
-        }
 
         // DELETE FROM <qualified-table-name>
         self.consume_keyword(Keyword::DELETE);
@@ -1684,56 +1922,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses `WITH [RECURSIVE] <common-table-expression>, ...` before DELETE.
-    ///
-    /// CTE bodies require select-stmt support. Since sqleibniz does not model select-stmt yet,
-    /// this validates the CTE envelope only far enough to report the body as unimplemented.
-    #[cfg_attr(feature = "trace", trace)]
-    fn with_clause_before_delete(&mut self) -> Option<()> {
-        // RECURSIVE
-        self.consume_if_keyword(Keyword::RECURSIVE);
-
-        loop {
-            // <common-table-expression>
-            self.common_table_expression_before_delete()?;
-
-            // , <common-table-expression>
-            if self.consume_if(Type::Comma) {
-                if self.is_keyword(Keyword::DELETE) || self.is(Type::Semicolon) {
-                    let src = Location::from(self.cur());
-                    self.push_doc_err(
-                        "Malformed WITH clause",
-                        "WITH common table expression list has a trailing comma",
-                        src,
-                        Rule::Syntax,
-                        "https://www.sqlite.org/syntax/common-table-expression.html",
-                    );
-                    return None;
-                }
-                continue;
-            }
-
-            break;
-        }
-
-        if self.is_keyword(Keyword::DELETE) {
-            Some(())
-        } else {
-            let src = Location::from(self.cur());
-            self.push_doc_err(
-                "Malformed DELETE statement",
-                "WITH before DELETE requires DELETE after the common table expressions",
-                src,
-                Rule::Syntax,
-                "https://www.sqlite.org/lang_delete.html",
-            );
-            None
-        }
-    }
-
     /// https://www.sqlite.org/syntax/common-table-expression.html
     #[cfg_attr(feature = "trace", trace)]
-    fn common_table_expression_before_delete(&mut self) -> Option<()> {
+    fn common_table_expression(&mut self) -> Option<()> {
         // <table-name>
         self.consume_ident(
             "https://www.sqlite.org/syntax/common-table-expression.html",
@@ -1756,14 +1947,14 @@ impl<'a> Parser<'a> {
 
         // (<select-stmt>)
         self.consume(Type::BraceLeft);
-        self.reject_cte_body_before_delete()
+        self.reject_cte_body()
     }
 
     /// Rejects a CTE body until select-stmt parsing exists.
     ///
     /// See: https://www.sqlite.org/syntax/common-table-expression.html
     #[cfg_attr(feature = "trace", trace)]
-    fn reject_cte_body_before_delete(&mut self) -> Option<()> {
+    fn reject_cte_body(&mut self) -> Option<()> {
         let src = Location::from(self.cur());
         if self.is_keyword(Keyword::SELECT) {
             self.push_doc_err(

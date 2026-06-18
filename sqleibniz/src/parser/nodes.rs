@@ -400,6 +400,34 @@ pub struct DeleteLimit {
     pub offset: Option<Expr>,
 }
 
+#[derive(Debug)]
+pub enum InsertSource {
+    DefaultValues,
+    Values(Vec<Vec<Expr>>),
+}
+
+node!(
+    Insert,
+    r"INSERT statement, see: https://www.sqlite.org/lang_insert.html
+
+The INSERT command creates new rows in a table. This node represents SQLite's INSERT statement
+forms that do not require select-stmt support: DEFAULT VALUES and VALUES rows, with optional
+column lists, conflict algorithms, and RETURNING clauses. SELECT-backed INSERT and UPSERT clauses
+produce unsupported diagnostics until those grammar branches are modelled.
+
+```sql
+INSERT INTO table_name DEFAULT VALUES;
+INSERT INTO table_name (id, name) VALUES (1, 'Ada');
+INSERT OR IGNORE INTO schema_name.table_name VALUES (1) RETURNING *;
+```
+",
+    conflict: Option<Keyword>,
+    target: SchemaTableContainer,
+    columns: Vec<String>,
+    source: InsertSource,
+    returning: Vec<ReturningColumn>
+);
+
 node!(
     Delete,
     r"DELETE statement, see: https://www.sqlite.org/lang_delete.html

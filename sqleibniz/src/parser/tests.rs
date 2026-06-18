@@ -41,10 +41,11 @@ macro_rules! test_group_pass_assert {
 mod should_pass {
     use crate::{
         parser::nodes::{
-            Alter, ColumnConstraint, ColumnDef, Delete, DeleteLimit, Expr, OrderingTerm,
-            QualifiedTableIndex, QualifiedTableName, ReturningColumn, SchemaTableContainer,
+            Alter, ColumnConstraint, ColumnDef, Delete, DeleteLimit, Expr, Insert, InsertSource,
+            OrderingTerm, QualifiedTableIndex, QualifiedTableName, ReturningColumn,
+            SchemaTableContainer,
         },
-        types::{Token, Type, storage::SqliteStorageClass},
+        types::{Keyword, Token, Type, storage::SqliteStorageClass},
     };
 
     fn alter_check(expr: Expr) -> Vec<Alter> {
@@ -128,6 +129,16 @@ mod should_pass {
         limit: Option<DeleteLimit>,
     ) -> Vec<Delete> {
         vec![Delete::new(target, where_expr, returning, order_by, limit)]
+    }
+
+    fn insert(
+        conflict: Option<Keyword>,
+        target: SchemaTableContainer,
+        columns: Vec<String>,
+        source: InsertSource,
+        returning: Vec<ReturningColumn>,
+    ) -> Vec<Insert> {
+        vec![Insert::new(conflict, target, columns, source, returning)]
     }
 
     test_group_pass_assert! {
@@ -330,6 +341,61 @@ mod should_pass {
             vec![],
             vec![],
             Some(DeleteLimit { limit: num(5.0), offset: Some(num(2.0)) }),
+        )
+    }
+
+    test_group_pass_assert! {
+        insert_stmt,
+
+        insert_default_values:
+        r"INSERT INTO users DEFAULT VALUES;"=insert(
+            None,
+            SchemaTableContainer::Table("users".into()),
+            vec![],
+            InsertSource::DefaultValues,
+            vec![],
+        ),
+
+        insert_values:
+        r"INSERT INTO users VALUES (1, 'Ada');"=insert(
+            None,
+            SchemaTableContainer::Table("users".into()),
+            vec![],
+            InsertSource::Values(vec![vec![num(1.0), string("Ada")]]),
+            vec![],
+        ),
+
+        insert_column_list_values:
+        r"INSERT INTO main.users (id, name) VALUES (1, 'Ada');"=insert(
+            None,
+            SchemaTableContainer::SchemaAndTable { schema: "main".into(), table: "users".into() },
+            vec!["id".into(), "name".into()],
+            InsertSource::Values(vec![vec![num(1.0), string("Ada")]]),
+            vec![],
+        ),
+
+        insert_multi_row_values:
+        r"INSERT INTO users (id, name) VALUES (1, 'Ada'), (2, 'Grace');"=insert(
+            None,
+            SchemaTableContainer::Table("users".into()),
+            vec!["id".into(), "name".into()],
+            InsertSource::Values(vec![
+                vec![num(1.0), string("Ada")],
+                vec![num(2.0), string("Grace")],
+            ]),
+            vec![],
+        ),
+
+        insert_or_ignore_returning:
+        r"INSERT OR IGNORE INTO users (id) VALUES (1) RETURNING *, id AS inserted_id;"=insert(
+            Some(Keyword::IGNORE),
+            SchemaTableContainer::Table("users".into()),
+            vec!["id".into()],
+            InsertSource::Values(vec![vec![num(1.0)]]),
+            vec![
+                ReturningColumn::Star,
+                ReturningColumn::Expr { expr: col("id"), alias: Some("inserted_id".into()) },
+            ],
         )
     }
 
@@ -1956,6 +2022,17 @@ mod should_fail {
         delete_with_select_unimplemented: "WITH stale AS (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
         delete_with_recursive_select_unimplemented: "WITH RECURSIVE stale AS NOT MATERIALIZED (SELECT 1) DELETE FROM users;" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
         delete_with_body_unimplemented: "WITH stale AS (VALUES (1)) DELETE FROM users;" => Rule::Unimplemented, "WITH common table expression bodies require select-stmt support",
+        insert_missing_into: "INSERT users VALUES (1);" => Rule::Syntax, "Wanted Keyword(INTO)",
+        insert_bad_conflict_algorithm: "INSERT OR NO INTO users VALUES (1);" => Rule::Syntax, "Wanted ROLLBACK, ABORT, REPLACE, FAIL or IGNORE after INSERT OR",
+        insert_missing_source: "INSERT INTO users;" => Rule::Syntax, "INSERT expected DEFAULT VALUES, VALUES or select-stmt",
+        insert_empty_column_list: "INSERT INTO users () VALUES (1);" => Rule::Syntax, "requires at least one column name",
+        insert_column_list_trailing_comma: "INSERT INTO users (id,) VALUES (1);" => Rule::Syntax, "column list has a trailing comma",
+        insert_empty_values_row: "INSERT INTO users VALUES ();" => Rule::Syntax, "INSERT VALUES row requires at least one expression",
+        insert_values_row_trailing_comma: "INSERT INTO users VALUES (1,);" => Rule::Syntax, "INSERT VALUES row has a trailing comma",
+        insert_values_rows_trailing_comma: "INSERT INTO users VALUES (1),;" => Rule::Syntax, "INSERT VALUES row list has a trailing comma",
+        insert_with_select_unimplemented: "WITH stale AS (SELECT 1) INSERT INTO users VALUES (1);" => Rule::Unimplemented, "SELECT in WITH common table expressions is not yet supported",
+        insert_select_unimplemented: "INSERT INTO users SELECT id FROM old_users;" => Rule::Unimplemented, "INSERT ... <select-stmt> is not yet supported",
+        insert_upsert_unimplemented: "INSERT INTO users VALUES (1) ON CONFLICT(id) DO NOTHING;" => Rule::Unimplemented, "INSERT upsert-clause is not yet supported",
 
         // sql_stmt dispatch
         unknown_keyword_suggestion: "usrs;" => Rule::UnknownKeyword, "did you mean one of",

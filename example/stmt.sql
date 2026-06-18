@@ -131,6 +131,12 @@ DELETE FROM main.users WHERE id = 1;
 DELETE FROM logs WHERE created_at < 10 ORDER BY created_at DESC NULLS LAST LIMIT 5 OFFSET 2;
 DELETE FROM users WHERE id = 1 RETURNING *, users.*, id AS deleted_id;
 
+-- https://www.sqlite.org/lang_insert.html
+INSERT INTO users DEFAULT VALUES;
+INSERT INTO main.users (id, name) VALUES (1, 'Ada');
+INSERT INTO users (id, name) VALUES (1, 'Ada'), (2, 'Grace');
+INSERT OR IGNORE INTO users (id) VALUES (1) RETURNING *, id AS inserted_id;
+
 -- https://www.sqlite.org/pragma.html
 PRAGMA database_list;
 PRAGMA schema.cache_size = 5;

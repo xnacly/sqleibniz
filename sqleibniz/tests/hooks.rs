@@ -65,7 +65,7 @@ leibniz = {
             name = "idents should be lowercase",
             match = { node = "Token", kind = "Ident" },
             hook = function(node)
-                if string.match(node.content, "%u") then
+                if string.match(node.content, "%u") and not sqleibniz.is_type_name(node) then
                     sqleibniz.diagnostic(node, "ident should be lowercase")
                 end
             end

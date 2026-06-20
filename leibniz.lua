@@ -1,4 +1,23 @@
 -- Example sqleibniz configuration.
+
+---@class SqleibnizHookNode
+---@field node string
+---@field kind string
+---@field content string
+---@field text string
+---@field line integer
+---@field start integer
+---@field finish integer
+---@field children SqleibnizHookNode[]
+
+---@class SqleibnizApi
+---@field diagnostic fun(node: SqleibnizHookNode, note: string)
+---@field is_keyword fun(value: string|SqleibnizHookNode): boolean
+---@field is_type_name fun(value: string|SqleibnizHookNode): boolean
+
+---@type SqleibnizApi
+sqleibniz = sqleibniz
+
 leibniz = {
     disabled_rules = {
         -- Ignore project-level diagnostics by default.
@@ -27,7 +46,7 @@ leibniz = {
             name = "idents should be lowercase",
             match = { node = "Token", kind = "Ident" },
             hook = function(node)
-                if string.match(node.content, "%u") then
+                if string.match(node.content, "%u") and not sqleibniz.is_type_name(node) then
                     sqleibniz.diagnostic(node, "All idents should be lowercase")
                 end
             end

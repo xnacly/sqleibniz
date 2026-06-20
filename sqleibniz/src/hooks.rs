@@ -1,7 +1,10 @@
 use crate::{
     error::{Error, Location},
     parser::nodes::Node,
-    types::{Token, Type, config::Hook, ctx::HookContext, rules::Rule},
+    types::{
+        Keyword, Token, Type, config::Hook, ctx::HookContext, rules::Rule,
+        storage::SqliteStorageClass,
+    },
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -46,6 +49,54 @@ fn hook_diagnostic(
     ))
 }
 
+fn hook_value_text(value: mlua::Value) -> mlua::Result<String> {
+    match value {
+        mlua::Value::String(value) => Ok(value.to_str()?.to_string()),
+        mlua::Value::Table(value) => value.get("content").or_else(|_| value.get("text")),
+        mlua::Value::Nil => Ok(String::new()),
+        value => Err(mlua::Error::FromLuaConversionError {
+            from: value.type_name(),
+            to: "string or hook node".to_string(),
+            message: Some("expected a string or hook node table".to_string()),
+        }),
+    }
+}
+
+fn sqlite_type_name(value: &str) -> bool {
+    SqliteStorageClass::from_str_strict(value.to_ascii_uppercase().as_str()).is_some()
+}
+
+fn sqleibniz_table(
+    lua: &mlua::Lua,
+    hook_file: String,
+    hook_name: String,
+    hook_errors: Rc<RefCell<Vec<Error>>>,
+) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table()?;
+    table.set(
+        "diagnostic",
+        lua.create_function(move |_, (node, note): (mlua::Table, String)| {
+            hook_errors
+                .borrow_mut()
+                .push(hook_diagnostic(&hook_file, &hook_name, node, note)?);
+            Ok(())
+        })?,
+    )?;
+    table.set(
+        "is_keyword",
+        lua.create_function(|_, value: mlua::Value| {
+            Ok(Keyword::from_str(&hook_value_text(value)?).is_some())
+        })?,
+    )?;
+    table.set(
+        "is_type_name",
+        lua.create_function(|_, value: mlua::Value| {
+            Ok(sqlite_type_name(&hook_value_text(value)?))
+        })?,
+    )?;
+    Ok(table)
+}
+
 fn hook_matches(hook: &Hook, ctx: &HookContext) -> bool {
     let Some(matcher) = &hook.matcher else {
         return true;
@@ -79,21 +130,9 @@ fn run_context(
                 let hook_errors = Rc::clone(&reported_errors);
                 let hook_file = file.to_string();
                 let hook_name = hook.name.clone();
-                let sqleibniz = lua.create_table();
-                let sqleibniz_diagnostic = sqleibniz.and_then(|table| {
-                    table.set(
-                        "diagnostic",
-                        lua.create_function(move |_, (node, note): (mlua::Table, String)| {
-                            hook_errors
-                                .borrow_mut()
-                                .push(hook_diagnostic(&hook_file, &hook_name, node, note)?);
-                            Ok(())
-                        })?,
-                    )?;
-                    Ok(table)
-                });
+                let sqleibniz = sqleibniz_table(lua, hook_file, hook_name, hook_errors);
 
-                match sqleibniz_diagnostic {
+                match sqleibniz {
                     Ok(table) => {
                         if let Err(err) = lua.globals().set("sqleibniz", table) {
                             errors.push(hook_error(file, hook, ctx, err));

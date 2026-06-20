@@ -1,6 +1,6 @@
 [package]
 name = "sqleibniz"
-version = "0.0.2-pre"
+version = "0.0.3-pre"
 edition = "2024"
 description = "Static analysis and LSP for SQL in Rust"
 repository = "https://github.com/xnacly/sqleibniz"

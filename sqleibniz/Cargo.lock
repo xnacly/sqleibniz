@@ -550,7 +550,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "sqleibniz"
-version = "0.0.1-pre"
+version = "0.0.3-pre"
 dependencies = [
  "clap",
  "lsp-server",

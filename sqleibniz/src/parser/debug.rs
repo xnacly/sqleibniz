@@ -24,37 +24,11 @@ pub trait FieldHookContexts {
     fn field_hook_contexts(&self) -> Vec<HookContext>;
 }
 
-pub trait FieldDiagnostics {
-    fn field_diagnostics(
-        &self,
-        file: &str,
-        context: &mut crate::analyse::AnalysisContext,
-    ) -> Vec<crate::error::Error>;
-}
-
 macro_rules! impl_empty_field_hook_contexts {
     ($($tt:ty),*) => {
         $(
             impl FieldHookContexts for $tt {
                 fn field_hook_contexts(&self) -> Vec<HookContext> {
-                    vec![]
-                }
-            }
-        )*
-    };
-}
-
-macro_rules! impl_empty_field_diagnostics {
-    ($($tt:ty),*) => {
-        $(
-            impl FieldDiagnostics for $tt {
-                fn field_diagnostics(
-                    &self,
-                    file: &str,
-                    context: &mut crate::analyse::AnalysisContext,
-                ) -> Vec<crate::error::Error> {
-                    let _ = file;
-                    let _ = context;
                     vec![]
                 }
             }
@@ -203,32 +177,9 @@ impl FieldHookContexts for InsertSource {
     }
 }
 
-impl FieldDiagnostics for InsertSource {
-    fn field_diagnostics(
-        &self,
-        file: &str,
-        context: &mut crate::analyse::AnalysisContext,
-    ) -> Vec<crate::error::Error> {
-        match self {
-            InsertSource::DefaultValues | InsertSource::Values(_) => vec![],
-            InsertSource::Select(select) => select.analyse(file, context),
-        }
-    }
-}
-
 impl FieldHookContexts for CommonTableExpression {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         vec![self.select.as_hook_context()]
-    }
-}
-
-impl FieldDiagnostics for CommonTableExpression {
-    fn field_diagnostics(
-        &self,
-        file: &str,
-        context: &mut crate::analyse::AnalysisContext,
-    ) -> Vec<crate::error::Error> {
-        self.select.analyse(file, context)
     }
 }
 
@@ -372,16 +323,6 @@ impl<T: Node + ?Sized> FieldHookContexts for Box<T> {
     }
 }
 
-impl<T: Node + ?Sized> FieldDiagnostics for Box<T> {
-    fn field_diagnostics(
-        &self,
-        file: &str,
-        context: &mut crate::analyse::AnalysisContext,
-    ) -> Vec<crate::error::Error> {
-        self.analyse(file, context)
-    }
-}
-
 impl<T: FieldSerializable> FieldSerializable for Option<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
         match self {
@@ -400,19 +341,6 @@ impl<T: FieldHookContexts> FieldHookContexts for Option<T> {
     }
 }
 
-impl<T: FieldDiagnostics> FieldDiagnostics for Option<T> {
-    fn field_diagnostics(
-        &self,
-        file: &str,
-        context: &mut crate::analyse::AnalysisContext,
-    ) -> Vec<crate::error::Error> {
-        match self {
-            Some(n) => n.field_diagnostics(file, context),
-            None => vec![],
-        }
-    }
-}
-
 impl<T: FieldSerializable> FieldSerializable for Vec<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::Value::Array(self.iter().map(|n| n.field_as_serializable()).collect())
@@ -422,18 +350,6 @@ impl<T: FieldSerializable> FieldSerializable for Vec<T> {
 impl<T: FieldHookContexts> FieldHookContexts for Vec<T> {
     fn field_hook_contexts(&self) -> Vec<HookContext> {
         self.iter().flat_map(|n| n.field_hook_contexts()).collect()
-    }
-}
-
-impl<T: FieldDiagnostics> FieldDiagnostics for Vec<T> {
-    fn field_diagnostics(
-        &self,
-        file: &str,
-        context: &mut crate::analyse::AnalysisContext,
-    ) -> Vec<crate::error::Error> {
-        self.iter()
-            .flat_map(|n| n.field_diagnostics(file, context))
-            .collect()
     }
 }
 
@@ -452,35 +368,6 @@ impl_empty_field_hook_contexts!(
     TriggerTiming,
     TriggerEvent,
     TriggerBodyStmt
-);
-
-impl_empty_field_diagnostics!(
-    String,
-    bool,
-    Token,
-    Keyword,
-    SqliteStorageClass,
-    BindParameter,
-    Expr,
-    SchemaTableContainer,
-    QualifiedTableName,
-    QualifiedTableIndex,
-    IndexedColumn,
-    ResultColumn,
-    SelectQuantifier,
-    SelectSource,
-    SelectTable,
-    JoinOperator,
-    OrderingTerm,
-    LimitOffset,
-    UpdateAssignment,
-    ColumnConstraint,
-    TableConstraint,
-    ForeignKeyClause,
-    TriggerTiming,
-    TriggerEvent,
-    TriggerBodyStmt,
-    PragmaInvocation
 );
 
 impl FieldHookContexts for ResultColumn {

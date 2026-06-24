@@ -1,6 +1,6 @@
-use crate::analyse::AnalysisContext;
+use crate::analyse::{AnalysisContext, fields::FieldDiagnostics};
 use crate::error::{Error, Location};
-use crate::parser::debug::{FieldDiagnostics, FieldHookContexts, FieldSerializable};
+use crate::parser::debug::{FieldHookContexts, FieldSerializable};
 use crate::types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass};
 
 macro_rules! field_hook_contexts {
@@ -108,15 +108,9 @@ macro_rules! node {
             }
 
             fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-                #[cfg(feature = "trace-analysis")]
-                crate::analyse::trace::enter_node();
-
-                let diagnostics = node_diagnostics!(file, context, [$(self.$field_name),*] $(, $analyser)?, self);
-
-                #[cfg(feature = "trace-analysis")]
-                crate::analyse::trace::exit_node(self.name(), self.location(), &diagnostics);
-
-                diagnostics
+                crate::analyse::analyse_node(self, file, context, |file, context| {
+                    node_diagnostics!(file, context, [$(self.$field_name),*] $(, $analyser)?, self)
+                })
             }
         }
 

@@ -2,18 +2,23 @@ use crate::{
     analyse::{AnalysisContext, Relation, RelationKind},
     error::{Error, Location},
     parser::nodes::{
-        Delete, Insert, InsertSource, Node, QualifiedTableName, SchemaTableContainer, Select,
-        SelectSource, Update, With,
+        Delete, Expr, Insert, InsertSource, Node, QualifiedTableName, ResultColumn,
+        SchemaTableContainer, Select, SelectSource, SelectTable, Update, With,
     },
     types::rules::Rule,
 };
 
 pub fn select(file: &str, context: &mut AnalysisContext, select: &Select) -> Vec<Error> {
-    select
+    let mut diagnostics = select
         .from
         .iter()
         .flat_map(|source| select_source_diagnostics(file, context, source, select.location()))
-        .collect()
+        .collect::<Vec<_>>();
+
+    let scope = SelectScope::from_select(context, select);
+    diagnostics.extend(select_column_diagnostics(file, &scope, select));
+
+    diagnostics
 }
 
 pub fn insert(file: &str, context: &mut AnalysisContext, insert: &Insert) -> Vec<Error> {
@@ -148,6 +153,172 @@ fn column_list_diagnostics(
         .filter(|column| !relation_has_column(relation, column))
         .map(|column| unknown_column_diagnostic(file, relation_name, column, location))
         .collect()
+}
+
+fn select_column_diagnostics(file: &str, scope: &SelectScope, select: &Select) -> Vec<Error> {
+    select
+        .columns
+        .iter()
+        .flat_map(|column| result_column_diagnostics(file, scope, column))
+        .chain(
+            select
+                .where_expr
+                .iter()
+                .flat_map(|expr| expr_column_diagnostics(file, scope, expr)),
+        )
+        .chain(
+            select
+                .group_by
+                .iter()
+                .flat_map(|expr| expr_column_diagnostics(file, scope, expr)),
+        )
+        .chain(
+            select
+                .having
+                .iter()
+                .flat_map(|expr| expr_column_diagnostics(file, scope, expr)),
+        )
+        .chain(
+            select
+                .order_by
+                .iter()
+                .flat_map(|term| expr_column_diagnostics(file, scope, &term.expr)),
+        )
+        .collect()
+}
+
+fn result_column_diagnostics(file: &str, scope: &SelectScope, column: &ResultColumn) -> Vec<Error> {
+    match column {
+        ResultColumn::Star => Vec::new(),
+        ResultColumn::TableStar(_) => Vec::new(),
+        ResultColumn::Expr { expr, .. } => expr_column_diagnostics(file, scope, expr),
+    }
+}
+
+fn expr_column_diagnostics(file: &str, scope: &SelectScope, expr: &Expr) -> Vec<Error> {
+    let mut diagnostics = expr
+        .arguments
+        .iter()
+        .flat_map(|argument| expr_column_diagnostics(file, scope, argument))
+        .collect::<Vec<_>>();
+
+    let Some(column) = expr.column.as_deref() else {
+        return diagnostics;
+    };
+
+    if let Some(table) = expr.table.as_deref() {
+        if let Some(relation_name) = scope.relation_for_table_name(table) {
+            if let Some(relation) = scope.relation_for_relation_name(relation_name) {
+                if can_validate_columns(relation) && !relation_has_column(relation, column) {
+                    diagnostics.push(unknown_column_diagnostic(
+                        file,
+                        relation_name,
+                        column,
+                        expr.location(),
+                    ));
+                }
+            }
+        }
+        return diagnostics;
+    }
+
+    if let Some((relation_name, relation)) = scope.single_validated_relation() {
+        if !relation_has_column(relation, column) {
+            diagnostics.push(unknown_column_diagnostic(
+                file,
+                relation_name,
+                column,
+                expr.location(),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+#[derive(Default)]
+struct SelectScope<'a> {
+    sources: Vec<SelectScopeSource<'a>>,
+}
+
+struct SelectScopeSource<'a> {
+    name: &'a SchemaTableContainer,
+    alias: Option<&'a str>,
+    relation: Option<&'a Relation>,
+}
+
+impl<'a> SelectScope<'a> {
+    // SELECT column checks are deliberately conservative: validate qualified columns through a
+    // matching source alias/table name, and validate unqualified columns only when exactly one
+    // source has known columns from a CREATE TABLE statement.
+    fn from_select(context: &'a AnalysisContext, select: &'a Select) -> Self {
+        let mut scope = Self::default();
+        for source in &select.from {
+            scope.push_source(context, source);
+        }
+        scope
+    }
+
+    fn push_source(&mut self, context: &'a AnalysisContext, source: &'a SelectSource) {
+        match source {
+            SelectSource::Table(table) => self.push_table(context, table),
+            SelectSource::Join { left, right, .. } => {
+                self.push_source(context, left);
+                self.push_table(context, right);
+            }
+        }
+    }
+
+    fn push_table(&mut self, context: &'a AnalysisContext, table: &'a SelectTable) {
+        self.sources.push(SelectScopeSource {
+            name: &table.name,
+            alias: table.alias.as_deref(),
+            relation: context.relation(&table.name),
+        });
+    }
+
+    fn relation_for_table_name(&self, table: &str) -> Option<&'a SchemaTableContainer> {
+        self.sources
+            .iter()
+            .find(|source| source.matches_name(table))
+            .map(|source| source.name)
+    }
+
+    fn relation_for_relation_name(&self, name: &SchemaTableContainer) -> Option<&'a Relation> {
+        self.sources
+            .iter()
+            .find(|source| source.name == name)
+            .and_then(|source| source.relation)
+    }
+
+    fn single_validated_relation(&self) -> Option<(&'a SchemaTableContainer, &'a Relation)> {
+        let mut relations = self
+            .sources
+            .iter()
+            .filter_map(|source| source.relation.map(|relation| (source.name, relation)))
+            .filter(|(_, relation)| can_validate_columns(relation));
+
+        let relation = relations.next()?;
+        if relations.next().is_some() {
+            return None;
+        }
+
+        Some(relation)
+    }
+}
+
+impl SelectScopeSource<'_> {
+    fn matches_name(&self, table: &str) -> bool {
+        self.alias
+            .map(|alias| alias.eq_ignore_ascii_case(table))
+            .unwrap_or(false)
+            || match self.name {
+                SchemaTableContainer::Table(name) => name.eq_ignore_ascii_case(table),
+                SchemaTableContainer::SchemaAndTable { table: name, .. } => {
+                    name.eq_ignore_ascii_case(table)
+                }
+            }
+    }
 }
 
 fn can_validate_columns(relation: &Relation) -> bool {

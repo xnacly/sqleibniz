@@ -2715,6 +2715,16 @@ mod should_analyze {
             "CREATE TABLE users (id INTEGER) STRICT; UPDATE users SET name = 'Ada';" => Rule::UnknownColumn, "explicit column list",
         unknown_update_column_list_column:
             "CREATE TABLE users (id INTEGER) STRICT; UPDATE users SET (id, name) = user_defaults();" => Rule::UnknownColumn, "explicit column list",
+        unknown_select_column:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT name FROM users;" => Rule::UnknownColumn, "explicit column list",
+        unknown_select_where_column:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT id FROM users WHERE name = 'Ada';" => Rule::UnknownColumn, "explicit column list",
+        unknown_select_qualified_column:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT users.name FROM users;" => Rule::UnknownColumn, "explicit column list",
+        unknown_select_alias_column:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT u.name FROM users AS u;" => Rule::UnknownColumn, "explicit column list",
+        unknown_select_join_qualified_column:
+            "CREATE TABLE users (id INTEGER, team_id INTEGER) STRICT; CREATE TABLE teams (id INTEGER) STRICT; SELECT t.name FROM users u JOIN teams t ON u.team_id = t.id;" => Rule::UnknownColumn, "explicit column list",
         unknown_pragma:
             "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
@@ -2753,6 +2763,20 @@ mod should_analyze {
             "CREATE TABLE source (id INTEGER) STRICT; CREATE TABLE snapshot AS SELECT id FROM source; INSERT INTO snapshot (missing) VALUES (1);",
         insert_into_virtual_table_without_known_columns_is_not_diagnosed:
             "CREATE VIRTUAL TABLE docs USING fts5(content); INSERT INTO docs (missing) VALUES ('Ada');",
+        select_known_column_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; SELECT name FROM users;",
+        select_known_where_column_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; SELECT id FROM users WHERE name = 'Ada';",
+        select_known_qualified_column_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; SELECT users.name FROM users;",
+        select_known_alias_column_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; SELECT u.name FROM users AS u;",
+        select_multi_table_unqualified_column_is_not_diagnosed:
+            "CREATE TABLE users (id INTEGER) STRICT; CREATE TABLE teams (id INTEGER) STRICT; SELECT name FROM users JOIN teams;",
+        select_unknown_source_columns_are_not_diagnosed:
+            "SELECT name FROM external_users;",
+        select_cte_columns_are_not_diagnosed:
+            "CREATE TABLE users (id INTEGER) STRICT; WITH cte_users AS (SELECT id FROM users) SELECT name FROM cte_users;",
         foreign_keys_query_has_no_recommendation:
             "PRAGMA foreign_keys;",
         foreign_keys_enabled_has_no_recommendation:

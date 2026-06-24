@@ -32,6 +32,9 @@ pub enum Rule {
     /// Source file references a table-like object not defined earlier in the file
     #[value(name = "sqlite/unknown-relation")]
     UnknownRelation,
+    /// Source file references a column not defined on a known table
+    #[value(name = "sqlite/unknown-column")]
+    UnknownColumn,
     /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
     /// from a stricter, conventional SQL model
     #[value(name = "sqlite/quirk")]
@@ -78,6 +81,7 @@ impl mlua::FromLua for Rule {
             "sqlite/unknown-pragma" => Self::UnknownPragma,
             "sqlite/duplicate-relation" => Self::DuplicateRelation,
             "sqlite/unknown-relation" => Self::UnknownRelation,
+            "sqlite/unknown-column" => Self::UnknownColumn,
             "sqlite/quirk" => Self::Quirk,
             _ => {
                 return Err(mlua::Error::FromLuaConversionError {
@@ -110,6 +114,7 @@ impl Rule {
             Self::UnknownPragma => "sqlite/unknown-pragma",
             Self::DuplicateRelation => "sqlite/duplicate-relation",
             Self::UnknownRelation => "sqlite/unknown-relation",
+            Self::UnknownColumn => "sqlite/unknown-column",
         }
     }
 
@@ -140,6 +145,7 @@ impl Rule {
             Self::UnknownRelation => {
                 "Source file references a table-like object not defined earlier in the file"
             }
+            Self::UnknownColumn => "Source file references a column not defined on a known table",
         }
     }
 }

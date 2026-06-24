@@ -2709,6 +2709,12 @@ mod should_analyze {
             "CREATE TABLE users (id INTEGER) STRICT; SELECT * FROM users JOIN teams;" => Rule::UnknownRelation, "after this file defines",
         unknown_insert_select_relation:
             "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO users SELECT id FROM usres;" => Rule::UnknownRelation, "after this file defines",
+        unknown_insert_column:
+            "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO users (name) VALUES ('Ada');" => Rule::UnknownColumn, "explicit column list",
+        unknown_update_column:
+            "CREATE TABLE users (id INTEGER) STRICT; UPDATE users SET name = 'Ada';" => Rule::UnknownColumn, "explicit column list",
+        unknown_update_column_list_column:
+            "CREATE TABLE users (id INTEGER) STRICT; UPDATE users SET (id, name) = user_defaults();" => Rule::UnknownColumn, "explicit column list",
         unknown_pragma:
             "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
@@ -2735,6 +2741,18 @@ mod should_analyze {
             "WITH cte_rows AS (SELECT id FROM users) SELECT * FROM cte_rows;",
         insert_select_known_relation_has_no_recommendation:
             "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO users SELECT id FROM users;",
+        insert_known_columns_have_no_recommendation:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; INSERT INTO users (id, name) VALUES (1, 'Ada');",
+        insert_columns_are_case_insensitive:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; INSERT INTO users (ID, NAME) VALUES (1, 'Ada');",
+        update_known_columns_have_no_recommendation:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; UPDATE users SET name = 'Ada';",
+        update_columns_are_case_insensitive:
+            "CREATE TABLE users (id INTEGER, name TEXT) STRICT; UPDATE users SET NAME = 'Ada';",
+        insert_into_ctas_without_known_columns_is_not_diagnosed:
+            "CREATE TABLE source (id INTEGER) STRICT; CREATE TABLE snapshot AS SELECT id FROM source; INSERT INTO snapshot (missing) VALUES (1);",
+        insert_into_virtual_table_without_known_columns_is_not_diagnosed:
+            "CREATE VIRTUAL TABLE docs USING fts5(content); INSERT INTO docs (missing) VALUES ('Ada');",
         foreign_keys_query_has_no_recommendation:
             "PRAGMA foreign_keys;",
         foreign_keys_enabled_has_no_recommendation:

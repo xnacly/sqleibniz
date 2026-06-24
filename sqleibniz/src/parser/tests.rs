@@ -2697,6 +2697,18 @@ mod should_analyze {
             "CREATE VIRTUAL TABLE items USING json_each(value);" => Rule::SqliteUnsupported, "not as a module for CREATE VIRTUAL TABLE",
         duplicate_relation:
             "CREATE TABLE users (id INTEGER) STRICT; CREATE TABLE users (id INTEGER) STRICT;" => Rule::DuplicateRelation, "IF NOT EXISTS",
+        unknown_select_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT * FROM usres;" => Rule::UnknownRelation, "after this file defines",
+        unknown_insert_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO usres VALUES (1);" => Rule::UnknownRelation, "after this file defines",
+        unknown_update_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; UPDATE usres SET id = 1;" => Rule::UnknownRelation, "after this file defines",
+        unknown_delete_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; DELETE FROM usres;" => Rule::UnknownRelation, "after this file defines",
+        unknown_join_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT * FROM users JOIN teams;" => Rule::UnknownRelation, "after this file defines",
+        unknown_insert_select_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO users SELECT id FROM usres;" => Rule::UnknownRelation, "after this file defines",
         unknown_pragma:
             "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
@@ -2707,6 +2719,22 @@ mod should_analyze {
             "CREATE TABLE users (id INTEGER) STRICT;",
         duplicate_relation_with_if_not_exists_has_no_recommendation:
             "CREATE TABLE users (id INTEGER) STRICT; CREATE TABLE IF NOT EXISTS users (id INTEGER) STRICT;",
+        standalone_select_unknown_relation_is_not_diagnosed:
+            "SELECT * FROM users;",
+        select_known_relation_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; SELECT * FROM users;",
+        insert_known_relation_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO users VALUES (1);",
+        update_known_relation_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; UPDATE users SET id = 1;",
+        delete_known_relation_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; DELETE FROM users;",
+        with_cte_relation_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; WITH cte_rows AS (SELECT id FROM users) SELECT * FROM cte_rows;",
+        standalone_with_unknown_relation_is_not_diagnosed:
+            "WITH cte_rows AS (SELECT id FROM users) SELECT * FROM cte_rows;",
+        insert_select_known_relation_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; INSERT INTO users SELECT id FROM users;",
         foreign_keys_query_has_no_recommendation:
             "PRAGMA foreign_keys;",
         foreign_keys_enabled_has_no_recommendation:

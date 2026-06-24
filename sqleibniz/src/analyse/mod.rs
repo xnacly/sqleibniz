@@ -6,6 +6,8 @@ pub mod create;
 pub(crate) mod fields;
 /// PRAGMA statement analysis rules.
 pub mod pragma;
+/// Relation reference analysis rules.
+pub mod relation;
 #[cfg(feature = "trace-analysis")]
 pub(crate) mod trace;
 

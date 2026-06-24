@@ -29,6 +29,9 @@ pub enum Rule {
     /// Source file defines the same table-like object more than once
     #[value(name = "sqlite/duplicate-relation")]
     DuplicateRelation,
+    /// Source file references a table-like object not defined earlier in the file
+    #[value(name = "sqlite/unknown-relation")]
+    UnknownRelation,
     /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
     /// from a stricter, conventional SQL model
     #[value(name = "sqlite/quirk")]
@@ -74,6 +77,7 @@ impl mlua::FromLua for Rule {
             "sqlite/unsupported" => Self::SqliteUnsupported,
             "sqlite/unknown-pragma" => Self::UnknownPragma,
             "sqlite/duplicate-relation" => Self::DuplicateRelation,
+            "sqlite/unknown-relation" => Self::UnknownRelation,
             "sqlite/quirk" => Self::Quirk,
             _ => {
                 return Err(mlua::Error::FromLuaConversionError {
@@ -105,6 +109,7 @@ impl Rule {
             Self::SqliteUnsupported => "sqlite/unsupported",
             Self::UnknownPragma => "sqlite/unknown-pragma",
             Self::DuplicateRelation => "sqlite/duplicate-relation",
+            Self::UnknownRelation => "sqlite/unknown-relation",
         }
     }
 
@@ -131,6 +136,9 @@ impl Rule {
             Self::UnknownPragma => "Source file uses a PRAGMA not documented by SQLite",
             Self::DuplicateRelation => {
                 "Source file defines the same table-like object more than once"
+            }
+            Self::UnknownRelation => {
+                "Source file references a table-like object not defined earlier in the file"
             }
         }
     }

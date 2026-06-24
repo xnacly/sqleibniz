@@ -10,6 +10,7 @@ pub enum RelationKind {
     Table,
     View,
     VirtualTable,
+    CommonTableExpression,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,11 +64,40 @@ impl AnalysisContext {
     }
 
     pub fn relation_count(&self) -> usize {
-        self.relations.len()
+        self.relations
+            .values()
+            .filter(|relation| relation.kind != RelationKind::CommonTableExpression)
+            .count()
     }
 
     pub fn relations(&self) -> impl Iterator<Item = &Relation> {
         self.relations.values()
+    }
+
+    pub(crate) fn with_scoped_relation<T>(
+        &mut self,
+        name: &SchemaTableContainer,
+        kind: RelationKind,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let key = relation_key(name);
+        let previous = self.relations.insert(
+            key.clone(),
+            Relation {
+                name: name.clone(),
+                kind,
+                columns: Vec::new(),
+            },
+        );
+
+        let result = f(self);
+
+        match previous {
+            Some(relation) => self.relations.insert(key, relation),
+            None => self.relations.remove(&key),
+        };
+
+        result
     }
 }
 
@@ -158,5 +188,34 @@ mod tests {
                 type_name: Some(SqliteStorageClass::Integer),
             }]
         );
+    }
+
+    #[test]
+    fn scoped_relation_is_removed_after_callback() {
+        let mut context = AnalysisContext::default();
+        let name = SchemaTableContainer::Table("rows".into());
+
+        context.with_scoped_relation(&name, RelationKind::CommonTableExpression, |context| {
+            assert!(context.contains_relation(&name));
+            assert_eq!(context.relation_count(), 0);
+        });
+
+        assert!(!context.contains_relation(&name));
+    }
+
+    #[test]
+    fn scoped_relation_restores_shadowed_relation() {
+        let mut context = AnalysisContext::default();
+        let name = SchemaTableContainer::Table("rows".into());
+        context.define_relation(&name, RelationKind::Table);
+
+        context.with_scoped_relation(&name, RelationKind::CommonTableExpression, |context| {
+            assert_eq!(
+                context.relation(&name).unwrap().kind,
+                RelationKind::CommonTableExpression
+            );
+        });
+
+        assert_eq!(context.relation(&name).unwrap().kind, RelationKind::Table);
     }
 }

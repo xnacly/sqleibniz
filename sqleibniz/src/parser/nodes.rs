@@ -479,6 +479,7 @@ SELECT users.* FROM users ORDER BY id LIMIT 10;
     having: Option<Expr>,
     order_by: Vec<OrderingTerm>,
     limit: Option<LimitOffset>
+    ; analyse(crate::analyse::relation::select)
 );
 
 #[derive(Debug)]
@@ -521,6 +522,7 @@ UPDATE users SET (name, email) = user_defaults();
     returning: Vec<ResultColumn>,
     order_by: Vec<OrderingTerm>,
     limit: Option<LimitOffset>
+    ; analyse(crate::analyse::relation::update)
 );
 
 node!(
@@ -541,6 +543,7 @@ INSERT OR IGNORE INTO schema_name.table_name VALUES (1) RETURNING *;
     columns: Vec<String>,
     source: InsertSource,
     returning: Vec<ResultColumn>
+    ; analyse(crate::analyse::relation::insert)
 );
 
 node!(
@@ -560,6 +563,7 @@ DELETE FROM users AS u INDEXED BY idx_users_id WHERE u.id = 1 RETURNING *;
     returning: Vec<ResultColumn>,
     order_by: Vec<OrderingTerm>,
     limit: Option<LimitOffset>
+    ; analyse(crate::analyse::relation::delete)
 );
 
 node!(
@@ -842,6 +846,7 @@ WITH RECURSIVE rows(id) AS NOT MATERIALIZED (SELECT 1) SELECT id FROM rows;
     recursive: bool,
     expressions: Vec<CommonTableExpression>,
     child: Box<dyn Node>
+    ; analyse(crate::analyse::relation::with)
 );
 
 #[derive(Debug, serde::Serialize)]

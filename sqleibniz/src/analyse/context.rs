@@ -35,6 +35,10 @@ impl AnalysisContext {
         self.define_relation_with_columns(name, kind, Vec::new());
     }
 
+    pub fn contains_relation(&self, name: &SchemaTableContainer) -> bool {
+        self.relation(name).is_some()
+    }
+
     pub fn define_relation_with_columns(
         &mut self,
         name: &SchemaTableContainer,

@@ -2695,6 +2695,8 @@ mod should_analyze {
             "PRAGMA foreign_keys = maybe;" => Rule::Syntax, "a boolean value",
         create_virtual_table_table_valued_function_module:
             "CREATE VIRTUAL TABLE items USING json_each(value);" => Rule::SqliteUnsupported, "not as a module for CREATE VIRTUAL TABLE",
+        duplicate_relation:
+            "CREATE TABLE users (id INTEGER) STRICT; CREATE TABLE users (id INTEGER) STRICT;" => Rule::DuplicateRelation, "IF NOT EXISTS",
         unknown_pragma:
             "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
@@ -2703,6 +2705,8 @@ mod should_analyze {
         negative_diagnostic_tests,
         create_table_strict_has_no_recommendation:
             "CREATE TABLE users (id INTEGER) STRICT;",
+        duplicate_relation_with_if_not_exists_has_no_recommendation:
+            "CREATE TABLE users (id INTEGER) STRICT; CREATE TABLE IF NOT EXISTS users (id INTEGER) STRICT;",
         foreign_keys_query_has_no_recommendation:
             "PRAGMA foreign_keys;",
         foreign_keys_enabled_has_no_recommendation:

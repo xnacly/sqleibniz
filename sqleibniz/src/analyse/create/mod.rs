@@ -1,7 +1,10 @@
 use crate::{
     analyse::{AnalysisContext, Column, RelationKind},
-    error::Error,
-    parser::nodes::{Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, Node},
+    error::{Error, Location},
+    parser::nodes::{
+        Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, Node,
+        SchemaTableContainer,
+    },
     parser::nodes::{ColumnConstraint, ColumnDef, TableConstraint},
     types::{rules::Rule, storage::SqliteStorageClass},
 };
@@ -9,17 +12,27 @@ use crate::{
 mod virtual_table;
 
 pub fn create_table(file: &str, context: &mut AnalysisContext, table: &CreateTable) -> Vec<Error> {
+    let mut diagnostics = duplicate_relation_diagnostic(
+        file,
+        context,
+        &table.name,
+        table.if_not_exists,
+        table.location,
+        "https://www.sqlite.org/lang_createtable.html",
+    );
+
     context.define_relation_with_columns(
         &table.name,
         RelationKind::Table,
         table.columns.iter().map(Column::from).collect(),
     );
 
-    let mut diagnostics = table
-        .columns
-        .iter()
-        .flat_map(|column| column.analyse(file, context))
-        .collect::<Vec<_>>();
+    diagnostics.extend(
+        table
+            .columns
+            .iter()
+            .flat_map(|column| column.analyse(file, context)),
+    );
 
     diagnostics.append(&mut nullable_primary_key_diagnostics(file, table));
 
@@ -46,13 +59,29 @@ pub fn create_table_as(
     context: &mut AnalysisContext,
     table: &CreateTableAs,
 ) -> Vec<Error> {
-    let diagnostics = table.select.analyse(file, context);
+    let mut diagnostics = table.select.analyse(file, context);
+    diagnostics.extend(duplicate_relation_diagnostic(
+        file,
+        context,
+        &table.name,
+        table.if_not_exists,
+        table.location,
+        "https://www.sqlite.org/lang_createtable.html",
+    ));
     context.define_relation(&table.name, RelationKind::Table);
     diagnostics
 }
 
 pub fn create_view(file: &str, context: &mut AnalysisContext, view: &CreateView) -> Vec<Error> {
-    let diagnostics = view.select.analyse(file, context);
+    let mut diagnostics = view.select.analyse(file, context);
+    diagnostics.extend(duplicate_relation_diagnostic(
+        file,
+        context,
+        &view.name,
+        view.if_not_exists,
+        view.location,
+        "https://www.sqlite.org/lang_createview.html",
+    ));
     context.define_relation(&view.name, RelationKind::View);
     diagnostics
 }
@@ -62,19 +91,28 @@ pub fn create_virtual_table(
     context: &mut AnalysisContext,
     table: &CreateVirtualTable,
 ) -> Vec<Error> {
+    let mut diagnostics = duplicate_relation_diagnostic(
+        file,
+        context,
+        &table.name,
+        table.if_not_exists,
+        table.location,
+        "https://www.sqlite.org/lang_createvtab.html",
+    );
+
     context.define_relation(&table.name, RelationKind::VirtualTable);
 
     let Some(module) = virtual_table::module(&table.module) else {
         // Applications can register their own virtual table modules, and SQLite's list is not
         // exhaustive. Unknown modules are valid syntax and should not be diagnosed here.
-        return Vec::new();
+        return diagnostics;
     };
 
     if module.create_virtual_table {
-        return Vec::new();
+        return diagnostics;
     }
 
-    vec![
+    diagnostics.push(
         Error::new(
             file,
             table.location,
@@ -83,7 +121,40 @@ pub fn create_virtual_table(
             "SQLite documents this virtual table module as a table-valued function or built-in virtual table, not as a module for CREATE VIRTUAL TABLE.",
         )
         .with_doc_url(module.doc),
+    );
+
+    diagnostics
+}
+
+fn duplicate_relation_diagnostic(
+    file: &str,
+    context: &AnalysisContext,
+    name: &SchemaTableContainer,
+    if_not_exists: bool,
+    location: Location,
+    doc_url: &'static str,
+) -> Vec<Error> {
+    if if_not_exists || !context.contains_relation(name) {
+        return Vec::new();
+    }
+
+    vec![
+        Error::new(
+            file,
+            location,
+            Rule::DuplicateRelation,
+            format!("Relation `{}` is defined more than once", relation_display(name)),
+            "SQLite rejects duplicate table, view, and virtual table names unless the statement uses IF NOT EXISTS.",
+        )
+        .with_doc_url(doc_url),
     ]
+}
+
+fn relation_display(name: &SchemaTableContainer) -> String {
+    match name {
+        SchemaTableContainer::Table(table) => table.clone(),
+        SchemaTableContainer::SchemaAndTable { schema, table } => format!("{schema}.{table}"),
+    }
 }
 
 fn nullable_primary_key_diagnostics(file: &str, table: &CreateTable) -> Vec<Error> {
@@ -191,6 +262,10 @@ mod tests {
         )
     }
 
+    fn typed_id_column() -> ColumnDef {
+        ColumnDef::new("id".into(), Some(SqliteStorageClass::Integer), vec![])
+    }
+
     fn create_virtual_table_node(module: &str) -> CreateVirtualTable {
         CreateVirtualTable::new(
             false,
@@ -237,14 +312,7 @@ mod tests {
 
     #[test]
     fn recommends_strict_for_non_strict_tables() {
-        let table = create_table_node(
-            vec![ColumnDef::new(
-                "id".into(),
-                Some(SqliteStorageClass::Integer),
-                vec![],
-            )],
-            false,
-        );
+        let table = create_table_node(vec![typed_id_column()], false);
 
         let (diagnostics, context) = create_table_diagnostics(&table);
 
@@ -276,18 +344,85 @@ mod tests {
 
     #[test]
     fn accepts_strict_tables_without_column_diagnostics() {
-        let table = create_table_node(
-            vec![ColumnDef::new(
-                "id".into(),
-                Some(SqliteStorageClass::Integer),
-                vec![],
-            )],
-            true,
-        );
+        let table = create_table_node(vec![typed_id_column()], true);
 
         let (diagnostics, _) = create_table_diagnostics(&table);
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn reports_duplicate_create_table_relations() {
+        let first = create_table_node(vec![typed_id_column()], true);
+        let second = create_table_node(vec![typed_id_column()], true);
+        let mut context = AnalysisContext::default();
+
+        assert!(create_table("test.sql", &mut context, &first).is_empty());
+        let diagnostics = create_table("test.sql", &mut context, &second);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::DuplicateRelation);
+        assert!(diagnostics[0].msg.contains("defined more than once"));
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/lang_createtable.html")
+        );
+    }
+
+    #[test]
+    fn accepts_duplicate_create_table_relations_with_if_not_exists() {
+        let first = create_table_node(vec![typed_id_column()], true);
+        let second = CreateTable::new(
+            false,
+            true,
+            SchemaTableContainer::Table("users".into()),
+            vec![typed_id_column()],
+            vec![],
+            true,
+            false,
+        );
+        let mut context = AnalysisContext::default();
+
+        assert!(create_table("test.sql", &mut context, &first).is_empty());
+        let diagnostics = create_table("test.sql", &mut context, &second);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn reports_duplicate_schema_qualified_relations_case_insensitively() {
+        let first = CreateTable::new(
+            false,
+            false,
+            SchemaTableContainer::SchemaAndTable {
+                schema: "Main".into(),
+                table: "Users".into(),
+            },
+            vec![typed_id_column()],
+            vec![],
+            true,
+            false,
+        );
+        let second = CreateTable::new(
+            false,
+            false,
+            SchemaTableContainer::SchemaAndTable {
+                schema: "main".into(),
+                table: "users".into(),
+            },
+            vec![typed_id_column()],
+            vec![],
+            true,
+            false,
+        );
+        let mut context = AnalysisContext::default();
+
+        assert!(create_table("test.sql", &mut context, &first).is_empty());
+        let diagnostics = create_table("test.sql", &mut context, &second);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::DuplicateRelation);
+        assert!(diagnostics[0].msg.contains("main.users"));
     }
 
     #[test]
@@ -340,6 +475,23 @@ mod tests {
         assert_eq!(
             diagnostics[0].doc_url,
             Some("https://www.sqlite.org/json1.html#jeach")
+        );
+    }
+
+    #[test]
+    fn reports_duplicate_create_virtual_table_relations() {
+        let first = create_virtual_table_node("fts5");
+        let second = create_virtual_table_node("fts5");
+        let mut context = AnalysisContext::default();
+
+        assert!(create_virtual_table("test.sql", &mut context, &first).is_empty());
+        let diagnostics = create_virtual_table("test.sql", &mut context, &second);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::DuplicateRelation);
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/lang_createvtab.html")
         );
     }
 
@@ -570,6 +722,28 @@ mod tests {
     }
 
     #[test]
+    fn reports_duplicate_create_table_as_relations() {
+        let first = create_table_node(vec![typed_id_column()], true);
+        let second = CreateTableAs::new(
+            false,
+            false,
+            SchemaTableContainer::Table("users".into()),
+            Box::new(empty_select()),
+        );
+        let mut context = AnalysisContext::default();
+
+        assert!(create_table("test.sql", &mut context, &first).is_empty());
+        let diagnostics = super::create_table_as("test.sql", &mut context, &second);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::DuplicateRelation);
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/lang_createtable.html")
+        );
+    }
+
+    #[test]
     fn registers_create_view_relations() {
         let view = CreateView::new(
             false,
@@ -589,6 +763,29 @@ mod tests {
                 .unwrap()
                 .kind,
             RelationKind::View
+        );
+    }
+
+    #[test]
+    fn reports_duplicate_create_view_relations() {
+        let first = create_table_node(vec![typed_id_column()], true);
+        let second = CreateView::new(
+            false,
+            false,
+            SchemaTableContainer::Table("users".into()),
+            vec![],
+            Box::new(empty_select()),
+        );
+        let mut context = AnalysisContext::default();
+
+        assert!(create_table("test.sql", &mut context, &first).is_empty());
+        let diagnostics = super::create_view("test.sql", &mut context, &second);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, Rule::DuplicateRelation);
+        assert_eq!(
+            diagnostics[0].doc_url,
+            Some("https://www.sqlite.org/lang_createview.html")
         );
     }
 }

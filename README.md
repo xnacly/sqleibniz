@@ -57,22 +57,22 @@ dynamic correctness. See below for a list of currently implemented features.
 | [`create-index-stmt`](https://www.sqlite.org/lang_createindex.html)        | ✅              | ❌                | `CREATE INDEX idx_users_id ON users (id);`                |
 | [`create-table-stmt`](https://www.sqlite.org/lang_createtable.html)        | ✅              | ✅                | `CREATE TABLE users (id INTEGER) STRICT;`                 |
 | [`create-trigger-stmt`](https://www.sqlite.org/lang_createtrigger.html)    | ✅              | ❌                | `CREATE TRIGGER user_ai AFTER INSERT ON users BEGIN SELECT 1; END;` |
-| [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ✅              | ❌                | `CREATE VIEW active_users AS SELECT id FROM users;`       |
+| [`create-view-stmt`](https://www.sqlite.org/lang_createview.html)          | ✅              | ✅                | `CREATE VIEW active_users AS SELECT id FROM users;`       |
 | [`create-virtual-table-stmt`](https://www.sqlite.org/lang_createvtab.html) | ✅              | ✅                | `CREATE VIRTUAL TABLE docs USING fts5(content);`          |
-| [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ✅              | ❌                | `DELETE FROM users WHERE id = 1 RETURNING *;`             |
+| [`delete-stmt`](https://www.sqlite.org/lang_delete.html)                   | ✅              | ✅                | `DELETE FROM users WHERE id = 1 RETURNING *;`             |
 | [`detach-stmt`](https://www.sqlite.org/lang_detach.html)                   | ✅              | ❌                | `DETACH DATABASE my_database;`                            |
 | [`drop-index-stmt`](https://www.sqlite.org/lang_dropindex.html)            | ✅              | ❌                | `DROP INDEX my_index;`                                    |
 | [`drop-table-stmt`](https://www.sqlite.org/lang_droptable.html)            | ✅              | ❌                | `DROP TABLE my_table;`                                    |
 | [`drop-trigger-stmt`](https://www.sqlite.org/lang_droptrigger.html)        | ✅              | ❌                | `DROP TRIGGER my_trigger;`                                |
 | [`drop-view-stmt`](https://www.sqlite.org/lang_dropview.html)              | ✅              | ❌                | `DROP VIEW my_view;`                                      |
-| [`insert-stmt`](https://www.sqlite.org/lang_insert.html)                   | ✅              | ❌                | `INSERT INTO users (id) VALUES (1) RETURNING *;`          |
+| [`insert-stmt`](https://www.sqlite.org/lang_insert.html)                   | ✅              | ✅                | `INSERT INTO users (id) VALUES (1) RETURNING *;`          |
 | [`pragma-stmt`](https://www.sqlite.org/pragma.html)                        | ✅              | ✅                | `PRAGMA schema.optimize(0xfffe);`                         |
 | [`reindex-stmt`](https://www.sqlite.org/lang_reindex.html)                 | ✅              | ❌                | `REINDEX my_schema.my_table;`                             |
 | [`release-stmt`](https://www.sqlite.org/lang_savepoint.html)               | ✅              | ❌                | `RELEASE SAVEPOINT latest_savepoint;`                     |
 | [`rollback-stmt`](https://www.sqlite.org/lang_transaction.html)            | ✅              | ❌                | `ROLLBACK TO latest_savepoint;`                           |
 | [`savepoint-stmt`](https://www.sqlite.org/lang_savepoint.html)             | ✅              | ❌                | `SAVEPOINT latest_savepoint;`                             |
-| [`select-stmt`](https://www.sqlite.org/lang_select.html)                   | ✅              | ❌                | `SELECT id FROM users WHERE active = true;`               |
-| [`update-stmt`](https://www.sqlite.org/lang_update.html)                   | ✅              | ❌                | `UPDATE users SET name = 'Ada' WHERE id = 1;`             |
+| [`select-stmt`](https://www.sqlite.org/lang_select.html)                   | ✅              | ✅                | `SELECT id FROM users WHERE active = true;`               |
+| [`update-stmt`](https://www.sqlite.org/lang_update.html)                   | ✅              | ✅                | `UPDATE users SET name = 'Ada' WHERE id = 1;`             |
 | [`vacuum-stmt`](https://www.sqlite.org/lang_vacuum.html)                   | ✅              | ❌                | `VACUUM INTO 'repacked.db';`                              |
 
 See [example/stmt.sql](./example/stmt.sql) for the executable statement support

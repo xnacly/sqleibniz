@@ -319,20 +319,42 @@ impl Keyword {
     pub fn suggestions(s: &str) -> Vec<&str> {
         let input = s.to_uppercase();
         let bytes = input.as_bytes();
-        let mut best: Vec<(&str, usize)> = Vec::with_capacity(3);
-        for keyword in KEYWORDS.iter() {
-            let dist = lev::distance(bytes, keyword.as_bytes());
 
-            if best.len() < 3 {
-                best.push((keyword, dist));
-                best.sort_unstable_by_key(|k| k.1);
-            } else if dist < best[2].1 {
-                best[2] = (keyword, dist);
-                best.sort_unstable_by_key(|k| k.1);
+        let mut best = [("", usize::MAX); 3];
+        let mut len = 0;
+        let mut prev_row = Vec::with_capacity(32);
+        let mut cur_row = Vec::with_capacity(32);
+
+        for &keyword in KEYWORDS.iter() {
+            let max_distance = if len < best.len() {
+                usize::MAX
+            } else if best[best.len() - 1].1 == 0 {
+                continue;
+            } else {
+                best[best.len() - 1].1 - 1
+            };
+
+            let Some(dist) = lev::bounded_distance_with_rows(
+                bytes,
+                keyword.as_bytes(),
+                max_distance,
+                &mut prev_row,
+                &mut cur_row,
+            ) else {
+                continue;
+            };
+
+            if len < best.len() {
+                best[len] = (keyword, dist);
+                len += 1;
+            } else {
+                best[best.len() - 1] = (keyword, dist);
             }
+
+            best[..len].sort_unstable_by_key(|k| k.1);
         }
 
-        best.into_iter().map(|(k, _)| k).collect()
+        best[..len].iter().map(|(k, _)| *k).collect()
     }
 
     pub fn from_str(s: &str) -> Option<Keyword> {

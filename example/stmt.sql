@@ -92,9 +92,11 @@ ALTER TABLE schema.table_name DROP column_name;
 ALTER TABLE schema.table_name DROP COLUMN column_name;
 
 -- https://www.sqlite.org/lang_createtable.html
-CREATE TABLE users (id INTEGER, metadata ANY) STRICT;
+CREATE TABLE users (id INTEGER, name TEXT, email TEXT, active INTEGER, team_id INTEGER, last_seen INTEGER, metadata ANY) STRICT;
 CREATE TEMP TABLE IF NOT EXISTS main.users (id INTEGER, name TEXT) STRICT;
 CREATE TABLE strict_users_without_rowid (id INTEGER PRIMARY KEY) STRICT, WITHOUT ROWID;
+CREATE TABLE teams (id INTEGER, name TEXT) STRICT;
+CREATE TABLE logs (created_at INTEGER) STRICT;
 CREATE TABLE memberships (
     user_id INTEGER,
     team_id INTEGER,

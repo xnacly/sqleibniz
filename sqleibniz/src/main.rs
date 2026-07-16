@@ -4,13 +4,37 @@
 use std::time::SystemTime;
 use std::{fs, process::exit, vec};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use sqleibniz::error::{self, Error, print_str_colored, warn};
 use sqleibniz::highlight::builder;
 use sqleibniz::lexer::Lexer;
 use sqleibniz::parser;
 use sqleibniz::types::config::Config;
 use sqleibniz::types::rules::Rule;
+
+#[derive(Subcommand)]
+enum Command {
+    /// explain a diagnostic rule or supported SQL statement
+    #[command(
+        after_help = "Examples:\n  sqleibniz explain sql/syntax\n  sqleibniz explain select-stmt\n  sqleibniz explain CreateTable\n  sqleibniz explain --list-rules\n  sqleibniz explain --list-stmts"
+    )]
+    Explain {
+        /// diagnostic rule or SQL statement name to explain
+        ///
+        /// Rules use their full id, for example sql/syntax or sqlite/unknown-column.
+        /// Statements accept canonical names like select-stmt plus aliases like select,
+        /// create-table, or CreateTable.
+        name: Option<String>,
+
+        /// list diagnostic rule ids accepted by explain and -D
+        #[arg(long, conflicts_with = "name")]
+        list_rules: bool,
+
+        /// list supported SQL statement names accepted by explain
+        #[arg(long, conflicts_with = "name")]
+        list_stmts: bool,
+    },
+}
 
 /// LSP and analysis cli for sql. Check for valid syntax, semantics and perform dynamic analysis.
 #[derive(clap::Parser)]
@@ -63,7 +87,9 @@ struct Cli {
     /// execute configured Lua hooks in language server diagnostics
     #[arg(long, requires = "lsp")]
     lsp_enable_hooks: bool,
-    // TODO: add a --doc <fuzzy ast node / ast name> to print node documentation
+
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
 struct FileResult {
@@ -87,6 +113,41 @@ fn record_ignored_rule(ignored_rules: &mut Vec<(Rule, usize)>, rule: Rule) {
 
 fn main() {
     let args = Cli::parse();
+
+    if let Some(Command::Explain {
+        name,
+        list_rules,
+        list_stmts,
+    }) = args.command
+    {
+        if list_rules {
+            print_explanation_list("Diagnostic rules", sqleibniz::explain::rules());
+        }
+        if list_stmts {
+            print_explanation_list("SQL statements", sqleibniz::explain::sql_statements());
+        }
+        if list_rules || list_stmts {
+            return;
+        }
+
+        let Some(name) = name else {
+            eprintln!(
+                "error: explain requires a name, --list-rules, or --list-stmts\n\nTry 'sqleibniz explain --help' for examples."
+            );
+            exit(2);
+        };
+
+        match sqleibniz::explain::lookup(&name) {
+            Some(explanation) => {
+                print_explanation(&explanation);
+            }
+            None => {
+                eprintln!("error: unknown rule or SQL statement '{name}'");
+                exit(1);
+            }
+        }
+        return;
+    }
 
     if args.lsp {
         if let Err(e) = sqleibniz::lsp::start(args.lsp_enable_hooks) {
@@ -366,5 +427,32 @@ fn main() {
 
     if verified != files.len() {
         exit(1);
+    }
+}
+
+fn print_explanation(explanation: &sqleibniz::explain::Explanation) {
+    let kind = match explanation.kind {
+        sqleibniz::explain::ExplanationKind::Rule => "rule",
+        sqleibniz::explain::ExplanationKind::SqlStatement => "sql statement",
+    };
+    println!("{} ({})", explanation.name, kind);
+    if explanation.details.is_none()
+        || matches!(explanation.kind, sqleibniz::explain::ExplanationKind::Rule)
+    {
+        println!("{}", explanation.description);
+    }
+    if let Some(documentation) = explanation.documentation {
+        println!("docs: {}", documentation);
+    }
+    if let Some(details) = explanation.details.as_deref() {
+        println!();
+        println!("{details}");
+    }
+}
+
+fn print_explanation_list(title: &str, explanations: Vec<sqleibniz::explain::Explanation>) {
+    println!("{title}:");
+    for explanation in explanations {
+        println!("  {:<32} {}", explanation.name, explanation.description);
     }
 }

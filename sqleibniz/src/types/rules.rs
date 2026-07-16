@@ -60,6 +60,11 @@ pub enum Rule {
     Semicolon,
 }
 
+pub struct RuleExample {
+    pub sql: &'static str,
+    pub explanation: &'static str,
+}
+
 impl mlua::FromLua for Rule {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         let value: String = lua.unpack(value)?;
@@ -146,6 +151,95 @@ impl Rule {
                 "Source file references a table-like object not defined earlier in the file"
             }
             Self::UnknownColumn => "Source file references a column not defined on a known table",
+        }
+    }
+
+    pub fn examples(&self) -> &'static [RuleExample] {
+        match self {
+            Self::NoContent => &[RuleExample {
+                sql: "",
+                explanation: "An empty file has no content to lex or analyse.",
+            }],
+            Self::NoStatements => &[RuleExample {
+                sql: "-- a file with comments but no SQL statements",
+                explanation: "Comments are content, but they do not contain executable SQL statements.",
+            }],
+            Self::Unimplemented => &[
+                RuleExample {
+                    sql: "CREATE INDEX idx_users_name ON users ((lower(name)));",
+                    explanation: "Expression indexes are valid SQLite syntax, but sqleibniz does not model them yet.",
+                },
+                RuleExample {
+                    sql: "SELECT id FROM users RIGHT JOIN teams;",
+                    explanation: "RIGHT JOIN is valid in modern SQLite, but this parser currently supports only a smaller JOIN subset.",
+                },
+            ],
+            Self::UnknownKeyword => &[RuleExample {
+                sql: "SELEKT id FROM users;",
+                explanation: "SELEKT is not a known SQL keyword; SELECT was probably intended.",
+            }],
+            Self::BadSqleibnizInstruction => &[RuleExample {
+                sql: "-- @sqleibniz::unknown",
+                explanation: "sqleibniz instructions must use a supported instruction name such as expect.",
+            }],
+            Self::Hook => &[RuleExample {
+                sql: "VACUUM UpperName;",
+                explanation: "A user-defined leibniz.lua hook can report this, for example when enforcing lowercase identifiers.",
+            }],
+            Self::SqliteUnsupported => &[RuleExample {
+                sql: "CREATE VIRTUAL TABLE items USING json_each(value);",
+                explanation: "json_each is a table-valued function, not a CREATE VIRTUAL TABLE module supported by SQLite.",
+            }],
+            Self::UnknownPragma => &[RuleExample {
+                sql: "PRAGMA some_extension_pragma;",
+                explanation: "SQLite ignores unknown PRAGMAs, so sqleibniz reports names not documented by SQLite.",
+            }],
+            Self::DuplicateRelation => &[RuleExample {
+                sql: "CREATE TABLE users (id INTEGER) STRICT;\nCREATE TABLE users (id INTEGER) STRICT;",
+                explanation: "The second CREATE TABLE defines the same relation name again without IF NOT EXISTS.",
+            }],
+            Self::UnknownRelation => &[RuleExample {
+                sql: "CREATE TABLE users (id INTEGER) STRICT;\nSELECT * FROM usres;",
+                explanation: "The query references usres, but only users has been defined earlier in the file.",
+            }],
+            Self::UnknownColumn => &[RuleExample {
+                sql: "CREATE TABLE users (id INTEGER) STRICT;\nSELECT name FROM users;",
+                explanation: "The users relation is known, but its explicit column list contains id and not name.",
+            }],
+            Self::Quirk => &[
+                RuleExample {
+                    sql: "CREATE TABLE users (id INTEGER);",
+                    explanation: "SQLite allows non-STRICT tables, but sqleibniz recommends STRICT for more predictable typing.",
+                },
+                RuleExample {
+                    sql: "PRAGMA foreign_keys = false;",
+                    explanation: "Disabling foreign key enforcement is legal SQLite behavior, but it weakens relational integrity.",
+                },
+            ],
+            Self::UnterminatedString => &[RuleExample {
+                sql: "SELECT 'unterminated;",
+                explanation: "The string literal starts with a single quote but never closes it.",
+            }],
+            Self::UnknownCharacter => &[RuleExample {
+                sql: "SELECT 1 # 2;",
+                explanation: "# is not a token sqleibniz accepts in SQL source.",
+            }],
+            Self::InvalidNumericLiteral => &[RuleExample {
+                sql: "SELECT 0x;",
+                explanation: "A hexadecimal numeric literal needs at least one hexadecimal digit after 0x.",
+            }],
+            Self::InvalidBlob => &[RuleExample {
+                sql: "SELECT x'zz';",
+                explanation: "Blob literals must contain hexadecimal digits; z is not valid hex data.",
+            }],
+            Self::Syntax => &[RuleExample {
+                sql: "SELECT id, FROM users;",
+                explanation: "The trailing comma means the SELECT result column list is missing another expression before FROM.",
+            }],
+            Self::Semicolon => &[RuleExample {
+                sql: "VACUUM",
+                explanation: "sqleibniz expects statements to be terminated with a semicolon.",
+            }],
         }
     }
 }

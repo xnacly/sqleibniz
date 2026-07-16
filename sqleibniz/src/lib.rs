@@ -2,6 +2,8 @@
 pub mod analyse;
 /// error does formatting and highlighting for errors
 pub mod error;
+/// explain provides metadata for rules and supported SQL statements
+pub mod explain;
 /// highlight implements logic for highlighting tokens found in a string
 pub mod highlight;
 /// hooks executes user-defined lua hooks over AST and token contexts

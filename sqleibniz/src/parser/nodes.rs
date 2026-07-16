@@ -60,6 +60,10 @@ macro_rules! node {
             )*
         }
 
+        impl $node_name {
+            pub const DOC: &'static str = $documentation;
+        }
+
         impl Node for $node_name {
             fn location(&self) -> Location {
                 self.location
@@ -104,7 +108,7 @@ macro_rules! node {
             }
 
             fn doc(&self) -> &str {
-                $documentation
+                Self::DOC
             }
 
             fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {

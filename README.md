@@ -5,7 +5,7 @@ perform dynamic analysis.
 
 > [!WARNING]  
 > Sqleibniz is in development, please keep this in mind before
-> creating issues. Contributions are always welcome 💗
+> creating issues.
 
 ## Features
 
@@ -82,31 +82,22 @@ matrix used by the examples.
 
 ### cargo
 
-```
-cargo install --git https://github.com/xnacly/sqleibniz
+```shell
+cargo install sqleibniz
 ```
 
 #### from source
 
 ```shell
 git clone https://github.com/xnacly/sqleibniz
-cargo install --path .
-```
-
-### via `make`
-
-> this builds the project with cargo and moves the resulting binary to
-> `/usr/bin/`.
-
-```shell
-git clone https://github.com/xnacly/sqleibniz
-make
+cd sqleibniz
+cargo install --path sqleibniz
 ```
 
 Uninstall via:
 
 ```shell
-make uninstall
+cargo uninstall sqleibniz
 ```
 
 ## Command line interface usage
@@ -204,95 +195,15 @@ unless the server is started with `--lsp-enable-hooks`.
 
 ### Setup in Neovim
 
-> requires systemwide installation beforehand via `make install`
+> requires installation beforehand via `cargo install`
 
 As simple as adding the following to the neovim lua config:
 
 ```lua
 vim.lsp.config.sqleibniz = {
-    cmd = { '/usr/bin/sqleibniz', '--lsp' },
+    cmd = { 'sqleibniz', '--lsp' },
     filetypes = { "sql" },
     root_markers = { "leibniz.lua" }
 }
 vim.lsp.enable('sqleibniz')
-```
-
-## Contribution
-
-Contributions are always welcome <3, but remember to test all features you contribute.
-
-### Local Dev env
-
-```shell
-git clone git@github.com:xNaCly/sqleibniz.git
-cargo run example/*
-```
-
-### Debugging the parser
-
-Run sqleibniz via cargo with `--features trace` to enable the log of each
-`Parser.<stmt_type>_stmt` function as well as the resulting ast nodes. This
-allows for a deeper insight for deadlocks etc.
-
-```sql
-EXPLAIN VACUUM;
-EXPLAIN QUERY PLAN VACUUM my_big_schema INTO 'repacked.db';
-```
-
-For instance, run the checked-in trace example:
-
-```text
-cargo run --features trace -- -i example/trace_example.sql
-```
-
-That prints the parser callstack and resulting AST before the normal diagnostic
-summary:
-
-```text
-============================== CALLSTACK ===============================
-↳ parse | Keyword(EXPLAIN)
- ↳ sql_stmt_list | Keyword(EXPLAIN)
-  ↳ sql_stmt_prefix | Keyword(EXPLAIN)
-   ↳ sql_stmt | Keyword(VACUUM)
-    ↳ vacuum_stmt | Keyword(VACUUM)
-   ↳ sql_stmt_prefix | Keyword(EXPLAIN)
-    ↳ sql_stmt | Keyword(VACUUM)
-     ↳ vacuum_stmt | Keyword(VACUUM)
-================================= AST ==================================
-- Explain(...) [child=Vacuum { ... }]
-- Explain(...) [child=Vacuum { ... }]
-took: [...]
-=============================== Summary ================================
-[+] example/trace_example.sql:
-    0 Diagnostic(s) detected
-    0 Diagnostic(s) ignored
-
-=> 1/1 Files verified successfully, 0 verification failed.
-```
-
-There is also `--ast` and `--ast-json`, both enabling ast introspection:
-
-```json
-[
-  {
-    "child": {
-      "filename": null,
-      "schema_name": null,
-      "type": "Vacuum"
-    },
-    "type": "Explain"
-  },
-  {
-    "child": {
-      "filename": {
-        "String": "repacked.db"
-      },
-      "schema_name": {
-        "Ident": "my_big_schema"
-      },
-      "type": "Vacuum"
-    },
-    "type": "Explain"
-  }
-]
 ```

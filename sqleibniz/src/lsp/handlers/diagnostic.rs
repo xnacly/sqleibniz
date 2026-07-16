@@ -1,4 +1,4 @@
-use lsp_server::{Connection, Message, RequestId, Response};
+use lsp_server::{Connection, Message, RequestId, Response, ResponseKind};
 use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentDiagnosticParams, Position, Range};
 
 use crate::{error::Error, lsp::error::LspError};
@@ -48,8 +48,7 @@ pub fn handle(
         .map_err(|err| format!("failed to serialize diagnostics: {err}"))?;
     let resp = Response {
         id,
-        result: Some(result),
-        error: None,
+        response_kind: ResponseKind::Ok { result },
     };
     connection
         .sender

@@ -6,7 +6,7 @@ use std::{collections::HashMap, path::PathBuf};
 use error::LspError;
 use lsp_server::{
     Connection, ErrorCode, ExtractError, Message, Notification, Request, RequestId, Response,
-    ResponseError,
+    ResponseError, ResponseKind,
 };
 use lsp_types::{
     DiagnosticOptions, InitializeParams, SaveOptions, ServerCapabilities, TextDocumentSyncKind,
@@ -308,12 +308,13 @@ fn send_error(
 ) -> Result<(), LspError> {
     let resp = Response {
         id,
-        result: None,
-        error: Some(ResponseError {
-            code: code as i32,
-            message,
-            data: None,
-        }),
+        response_kind: ResponseKind::Err {
+            error: ResponseError {
+                code: code as i32,
+                message,
+                data: None,
+            },
+        },
     };
     connection
         .sender

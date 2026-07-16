@@ -1,4 +1,4 @@
-use lsp_server::{Connection, Message, RequestId, Response};
+use lsp_server::{Connection, Message, RequestId, Response, ResponseKind};
 use lsp_types::{HoverParams, Position};
 
 use crate::{lsp::error::LspError, parser::nodes::Node};
@@ -35,8 +35,7 @@ pub fn handle(
         .map_err(|err| format!("failed to serialize hover: {err}"))?;
     let resp = Response {
         id,
-        result: Some(result),
-        error: None,
+        response_kind: ResponseKind::Ok { result },
     };
     connection
         .sender

@@ -5,6 +5,7 @@ edition = "2024"
 description = "SQLite lexer, parser, and abstract syntax tree for sqleibniz"
 repository = "https://github.com/xnacly/sqleibniz"
 license = "MIT"
+readme = "README.md"
 
 [features]
 trace = ["sqleibniz-proc"]

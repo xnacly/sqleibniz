@@ -1,6 +1,6 @@
 [package]
 name = "sqleibniz-ast"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "SQLite lexer, parser, and abstract syntax tree for sqleibniz"
 repository = "https://github.com/xnacly/sqleibniz"

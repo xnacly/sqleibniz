@@ -18,7 +18,7 @@ Add the crate to your project:
 
 ```toml
 [dependencies]
-sqleibniz-ast = "0.0.1"
+sqleibniz-ast = "0.0.2"
 ```
 
 Use [`parse`] for the usual one-step workflow:
@@ -55,7 +55,7 @@ Enable the optional `serde` feature to serialize AST nodes directly with
 Serde:
 
 ```toml
-sqleibniz-ast = { version = "0.0.1", features = ["serde"] }
+sqleibniz-ast = { version = "0.0.2", features = ["serde"] }
 ```
 
 For lower-level control, use `Lexer::new(...).run()` and then

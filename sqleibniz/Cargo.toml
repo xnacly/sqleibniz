@@ -1,6 +1,6 @@
 [package]
 name = "sqleibniz"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
 description = "Static analysis and LSP for SQL in Rust"
 repository = "https://github.com/xnacly/sqleibniz"
@@ -15,7 +15,7 @@ trace = ["sqleibniz-ast/trace"]
 trace-analysis = []
 
 [dependencies]
-sqleibniz-ast = { version = "0.0.1", path = "../sqleibniz-ast", features = ["serde"] }
+sqleibniz-ast = { version = "0.0.2", path = "../sqleibniz-ast", features = ["serde"] }
 
 clap = { version = "4.6.2", features = ["derive"] }
 lsp-server = "0.9.0"

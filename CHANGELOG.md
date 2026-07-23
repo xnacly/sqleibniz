@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.0.6
+
+### Changed
+
+- Release `sqleibniz-ast` `v0.0.2` without default CLI, Lua, or Serde dependencies.
+- Add an opt-in `serde` feature that implements `Serialize` directly for AST nodes and `dyn Node`; `sqleibniz` enables it for `--ast-json` output.
+- Move Lua configuration and hook context integration into `sqleibniz`; `Rule` is now a plain AST type with lookup through `Rule::from_name`.
+- Keep parser AST comparison serialization test-only in `sqleibniz-ast` through dev-dependencies.
+
+### Breaking
+
+- Remove the AST crate's CLI and Lua adapter implementations. AST serialization now requires the explicit `serde` feature.
+
 ## v0.0.5
 
 ### Added

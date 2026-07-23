@@ -1,6 +1,7 @@
 use crate::lev;
 
-#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, serde::Serialize, Copy)]
+#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Copy)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Keyword {

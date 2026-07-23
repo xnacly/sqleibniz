@@ -2,9 +2,7 @@
 
 pub mod config;
 
-pub mod ctx {
-    pub use sqleibniz_ast::types::ctx::*;
-}
+pub mod ctx;
 
 pub mod rules {
     pub use sqleibniz_ast::types::rules::*;

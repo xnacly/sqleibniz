@@ -34,8 +34,17 @@ impl Config {
         let table: Table = lua
             .unpack(raw_conf)
             .map_err(|err| format!("{}: {}", file_name, err))?;
+        let disabled_rules = table
+            .get::<Vec<String>>("disabled_rules")
+            .unwrap_or_else(|_| vec![])
+            .into_iter()
+            .map(|name| {
+                Rule::from_name(&name)
+                    .ok_or_else(|| format!("{}: Unknown rule name '{name}'", file_name))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            disabled_rules: table.get("disabled_rules").unwrap_or_else(|_| vec![]),
+            disabled_rules,
             hooks: None,
         })
     }
@@ -68,7 +77,18 @@ impl Config {
 impl FromLua for Config {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         let table: Table = lua.unpack(value)?;
-        let disabled_rules: Vec<Rule> = table.get("disabled_rules").unwrap_or_else(|_| vec![]);
+        let disabled_rules = table
+            .get::<Vec<String>>("disabled_rules")
+            .unwrap_or_else(|_| vec![])
+            .into_iter()
+            .map(|name| {
+                Rule::from_name(&name).ok_or_else(|| mlua::Error::FromLuaConversionError {
+                    from: "string",
+                    to: "sqleibniz rule".into(),
+                    message: Some(format!("Unknown rule name '{name}'")),
+                })
+            })
+            .collect::<mlua::Result<Vec<_>>>()?;
         let hooks: Option<Vec<Hook>> = table.get("hooks").ok();
         Ok(Self {
             disabled_rules,

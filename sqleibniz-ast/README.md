@@ -51,6 +51,13 @@ The parser recovers where it can. An AST can therefore be non-empty even when
 `errors` is non-empty—useful for editors and other tools that must work with
 incomplete SQL.
 
+Enable the optional `serde` feature to serialize AST nodes directly with
+Serde:
+
+```toml
+sqleibniz-ast = { version = "0.0.1", features = ["serde"] }
+```
+
 For lower-level control, use `Lexer::new(...).run()` and then
 `Parser::new(tokens, name).parse()` directly. AST node definitions are exposed
 from `sqleibniz_ast::parser::nodes`.

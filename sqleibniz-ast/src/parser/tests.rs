@@ -19,18 +19,15 @@ macro_rules! test_group_pass_assert {
                 let ast = parser.parse();
                 assert_eq!(parser.errors.len(), 0);
 
-                let serialized_ast = serde_json::to_string(
-                    &ast.into_iter()
-                        .map(|n| n.as_serializable())
-                        .collect::<Vec<_>>(),
-                ).unwrap();
-                let serialized_expected = serde_json::to_string(
-                    &$expected.into_iter()
-                        .map(|n| n.as_serializable())
-                        .collect::<Vec<_>>(),
-                    )
-                .unwrap();
-                pretty_assertions::assert_eq!(serialized_expected, serialized_ast);
+                let actual = ast
+                    .iter()
+                    .map(|node| node.as_test_serializable())
+                    .collect::<Vec<_>>();
+                let expected = $expected
+                    .iter()
+                    .map(|node| node.as_test_serializable())
+                    .collect::<Vec<_>>();
+                pretty_assertions::assert_eq!(expected, actual);
             }
         )*
         }

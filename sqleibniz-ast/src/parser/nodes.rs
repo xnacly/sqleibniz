@@ -1,24 +1,7 @@
 use crate::{
     error::Location,
-    parser::debug::{FieldHookContexts, FieldSerializable},
-    types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass},
+    types::{Keyword, Token, storage::SqliteStorageClass},
 };
-
-macro_rules! field_hook_contexts {
-    () => {
-        Vec::new()
-    };
-    ($($field:expr),+ $(,)?) => {
-        vec![
-            $(
-                $field.field_hook_contexts(),
-            )+
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<HookContext>>()
-    };
-}
 
 macro_rules! node {
     ($node_name:ident,$documentation:literal,$($field_name:ident:$field_type:ty),* $(; analyse($analyser:path))?) => {
@@ -54,29 +37,17 @@ macro_rules! node {
                 stringify!($node_name)
             }
 
-            fn as_serializable(&self) -> serde_json::Value {
+            #[cfg(test)]
+            fn as_test_serializable(&self) -> serde_json::Value {
                 let mut map = serde_json::Map::new();
                 map.insert("type".to_string(), serde_json::Value::String(stringify!($node_name).to_string()));
-
                 $(
-                    map.insert(stringify!($field_name).to_string(), self.$field_name.field_as_serializable());
+                    map.insert(
+                        stringify!($field_name).to_string(),
+                        crate::parser::test_support::FieldSerializable::field_as_serializable(&self.$field_name),
+                    );
                 )*
-
                 serde_json::Value::Object(map)
-            }
-
-            fn as_hook_context(&self) -> HookContext {
-                let children = field_hook_contexts!($(self.$field_name),*);
-
-                HookContext {
-                    node: stringify!($node_name).into(),
-                    kind: stringify!($node_name).into(),
-                    content: None,
-                    line: self.location.line,
-                    start: self.location.start,
-                    finish: self.location.end,
-                    children,
-                }
             }
 
             fn doc(&self) -> &str {
@@ -97,17 +68,30 @@ macro_rules! node {
             }
         }
 
-        impl FieldSerializable for $node_name {
+        #[cfg(test)]
+        impl crate::parser::test_support::FieldSerializable for $node_name {
             fn field_as_serializable(&self) -> serde_json::Value {
-                self.as_serializable()
+                self.as_test_serializable()
             }
         }
 
-        impl FieldHookContexts for $node_name {
-            fn field_hook_contexts(&self) -> Vec<HookContext> {
-                vec![self.as_hook_context()]
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for $node_name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::SerializeMap;
+
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", stringify!($node_name))?;
+                $(
+                    map.serialize_entry(stringify!($field_name), &self.$field_name)?;
+                )*
+                map.end()
             }
         }
+
     };
 }
 
@@ -116,10 +100,8 @@ pub trait Node: std::fmt::Debug + std::any::Any {
     #[cfg(feature = "trace")]
     fn display(&self, indent: usize);
     fn name(&self) -> &str;
-    /// serializes self as json
-    fn as_serializable(&self) -> serde_json::Value;
-    /// converts self into the data passed to Lua hooks
-    fn as_hook_context(&self) -> HookContext;
+    #[cfg(test)]
+    fn as_test_serializable(&self) -> serde_json::Value;
     /// returns the documentation url for sefl
     fn doc(&self) -> &str;
     /// Returns this node as `Any` for consumers that need type-specific behavior.
@@ -303,7 +285,8 @@ ANALYZE schema_name.index_or_table_name;
 );
 
 /// SchemaTableContainer contains either schema_name.table_name or table_name
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum SchemaTableContainer {
     /// schema_name.table_name
     SchemaAndTable { schema: String, table: String },
@@ -364,13 +347,15 @@ DROP VIEW IF EXISTS schema_name.view_name;
     argument: SchemaTableContainer
 );
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum QualifiedTableIndex {
     IndexedBy(String),
     NotIndexed,
 }
 
 #[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct QualifiedTableName {
     pub name: SchemaTableContainer,
     pub alias: Option<String>,
@@ -378,6 +363,7 @@ pub struct QualifiedTableName {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum ResultColumn {
     Star,
     TableStar(String),
@@ -385,6 +371,7 @@ pub enum ResultColumn {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct OrderingTerm {
     pub expr: Expr,
     pub order: Option<Keyword>,
@@ -392,18 +379,21 @@ pub struct OrderingTerm {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct LimitOffset {
     pub limit: Expr,
     pub offset: Option<Expr>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum SelectQuantifier {
     All,
     Distinct,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum JoinOperator {
     Inner,
     Left,
@@ -412,12 +402,14 @@ pub enum JoinOperator {
 }
 
 #[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct SelectTable {
     pub name: SchemaTableContainer,
     pub alias: Option<String>,
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum SelectSource {
     Table(SelectTable),
     Join {
@@ -452,6 +444,7 @@ SELECT users.* FROM users ORDER BY id LIMIT 10;
 );
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum InsertSource {
     DefaultValues,
     Values(Vec<Vec<Expr>>),
@@ -459,6 +452,7 @@ pub enum InsertSource {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct CommonTableExpression {
     pub name: String,
     pub columns: Vec<String>,
@@ -467,6 +461,7 @@ pub struct CommonTableExpression {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct UpdateAssignment {
     pub columns: Vec<String>,
     pub expr: Expr,
@@ -629,7 +624,8 @@ ALTER TABLE schema.table_name DROP COLUMN column_name;
     ; analyse(crate::analyse::create::alter)
 );
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 /// https://www.sqlite.org/syntax/foreign-key-clause.html ON [DELETE|UPDATE] ForeignKeyAction
 pub enum ForeignKeyAction {
     Cascade,
@@ -639,7 +635,8 @@ pub enum ForeignKeyAction {
     SetDefault,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 /// SQLite parses MATCH clauses (i.e. does not report a syntax error if you specify one), but does
 /// not enforce them. All foreign key constraints in SQLite are handled as if MATCH SIMPLE were
 /// specified, see https://sqlite.org/foreignkeys.html#fk_unsupported
@@ -649,7 +646,8 @@ pub enum ForeignKeyMatch {
     Partial,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 /// https://www.sqlite.org/syntax/foreign-key-clause.html
 pub struct ForeignKeyClause {
     pub foreign_table: String,
@@ -662,6 +660,7 @@ pub struct ForeignKeyClause {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 /// https://www.sqlite.org/syntax/column-constraint.html
 pub enum ColumnConstraint {
     PrimaryKey {
@@ -696,6 +695,7 @@ pub enum ColumnConstraint {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 /// https://www.sqlite.org/syntax/table-constraint.html
 pub enum TableConstraint {
     PrimaryKey {
@@ -818,7 +818,8 @@ WITH RECURSIVE rows(id) AS NOT MATERIALIZED (SELECT 1) SELECT id FROM rows;
     ; analyse(crate::analyse::relation::with)
 );
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct IndexedColumn {
     pub name: String,
     pub collation: Option<String>,
@@ -843,21 +844,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS schema.index_name ON table_name (column_name C
     columns: Vec<IndexedColumn>
 );
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum TriggerTiming {
     Before,
     After,
     InsteadOf,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum TriggerEvent {
     Delete,
     Insert,
     Update { columns: Vec<String> },
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum TriggerBodyStmt {
     Delete,
     Insert,
@@ -887,7 +891,8 @@ CREATE TEMP TRIGGER IF NOT EXISTS schema.trigger_name INSTEAD OF UPDATE OF colum
     body: Vec<TriggerBodyStmt>
 );
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum PragmaInvocation {
     Query,
     Assign { value: Token },
@@ -914,3 +919,58 @@ PRAGMA database_list;
     invocation: PragmaInvocation
     ; analyse(crate::analyse::pragma::pragma)
 );
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for dyn Node {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        macro_rules! serialize_node {
+            ($($node:ty),* $(,)?) => {
+                $(
+                    if let Some(node) = self.as_any().downcast_ref::<$node>() {
+                        return serde::Serialize::serialize(node, serializer);
+                    }
+                )*
+            };
+        }
+
+        serialize_node!(
+            Literal,
+            BindParameter,
+            Expr,
+            Explain,
+            Vacuum,
+            Begin,
+            Commit,
+            Rollback,
+            Detach,
+            Analyze,
+            Drop,
+            Select,
+            Update,
+            Insert,
+            Delete,
+            Savepoint,
+            Release,
+            Attach,
+            Reindex,
+            Alter,
+            ColumnDef,
+            CreateTable,
+            CreateTableAs,
+            CreateView,
+            CreateVirtualTable,
+            With,
+            CreateIndex,
+            CreateTrigger,
+            Pragma,
+        );
+
+        Err(serde::ser::Error::custom(format!(
+            "cannot serialize unknown AST node {}",
+            self.name()
+        )))
+    }
+}

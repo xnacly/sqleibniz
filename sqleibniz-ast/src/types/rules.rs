@@ -1,107 +1,79 @@
-#[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 /// Rule is attached to each diagnostic and can be disabled from the CLI or leibniz.lua.
-#[derive(clap::ValueEnum)]
 pub enum Rule {
     /// Source file is empty
-    #[value(name = "file/no-content")]
     NoContent,
     /// Source file is not empty but holds no statements
-    #[value(name = "file/no-statements")]
     NoStatements,
     /// Source file contains constructs sqleibniz does not yet understand
-    #[value(name = "sqleibniz/unimplemented")]
     Unimplemented,
     /// Source file contains an unknown keyword
-    #[value(name = "sql/unknown-keyword")]
     UnknownKeyword,
     /// Source file contains invalid sqleibniz instruction
-    #[value(name = "sqleibniz/bad-instruction")]
     BadSqleibnizInstruction,
     /// User-defined Lua hook reported a diagnostic
-    #[value(name = "sqleibniz/hook")]
     Hook,
     /// Source file uses sql features sqlite does not support
-    #[value(name = "sqlite/unsupported")]
     SqliteUnsupported,
     /// Source file uses a PRAGMA not documented by SQLite
-    #[value(name = "sqlite/unknown-pragma")]
     UnknownPragma,
     /// Source file defines the same table-like object more than once
-    #[value(name = "sqlite/duplicate-relation")]
     DuplicateRelation,
     /// Source file references a table-like object not defined earlier in the file
-    #[value(name = "sqlite/unknown-relation")]
     UnknownRelation,
     /// Source file references a column not defined on a known table
-    #[value(name = "sqlite/unknown-column")]
     UnknownColumn,
     /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
     /// from a stricter, conventional SQL model
-    #[value(name = "sqlite/quirk")]
     Quirk,
     /// Source file contains an unterminated string
-    #[value(name = "sql/unterminated-string")]
     UnterminatedString,
     /// The source file contains an unknown character
-    #[value(name = "sql/unknown-character")]
     UnknownCharacter,
     /// The source file contains an invalid numeric literal, either overflow or incorrect syntax
-    #[value(name = "sql/invalid-numeric-literal")]
     InvalidNumericLiteral,
     /// The source file contains an invalid blob literal, either bad hex data (a-f,A-F,0-9) or
     /// incorrect syntax
-    #[value(name = "sql/invalid-blob")]
     InvalidBlob,
     /// The source file contains a structure with incorrect syntax
-    #[value(name = "sql/syntax")]
     Syntax,
     /// The source file is missing a semicolon
-    #[value(name = "sql/missing-semicolon")]
     Semicolon,
 }
-
-impl mlua::UserData for Rule {}
 
 pub struct RuleExample {
     pub sql: &'static str,
     pub explanation: &'static str,
 }
 
-impl mlua::FromLua for Rule {
-    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
-        let value: String = lua.unpack(value)?;
-
-        Ok(match value.as_str() {
-            "file/no-content" => Self::NoContent,
-            "file/no-statements" => Self::NoStatements,
-            "sqleibniz/unimplemented" => Self::Unimplemented,
-            "sql/unterminated-string" => Self::UnterminatedString,
-            "sql/unknown-character" => Self::UnknownCharacter,
-            "sql/invalid-numeric-literal" => Self::InvalidNumericLiteral,
-            "sql/invalid-blob" => Self::InvalidBlob,
-            "sql/syntax" => Self::Syntax,
-            "sql/missing-semicolon" => Self::Semicolon,
-            "sqleibniz/bad-instruction" => Self::BadSqleibnizInstruction,
-            "sqleibniz/hook" => Self::Hook,
-            "sql/unknown-keyword" => Self::UnknownKeyword,
-            "sqlite/unsupported" => Self::SqliteUnsupported,
-            "sqlite/unknown-pragma" => Self::UnknownPragma,
-            "sqlite/duplicate-relation" => Self::DuplicateRelation,
-            "sqlite/unknown-relation" => Self::UnknownRelation,
-            "sqlite/unknown-column" => Self::UnknownColumn,
-            "sqlite/quirk" => Self::Quirk,
-            _ => {
-                return Err(mlua::Error::FromLuaConversionError {
-                    from: "string",
-                    to: "sqleibniz::rules::Rule".into(),
-                    message: Some(format!("Unknown rule name '{value}'")),
-                });
-            }
-        })
-    }
-}
-
 impl Rule {
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::NoContent,
+            Self::NoStatements,
+            Self::Unimplemented,
+            Self::UnknownKeyword,
+            Self::BadSqleibnizInstruction,
+            Self::Hook,
+            Self::SqliteUnsupported,
+            Self::UnknownPragma,
+            Self::DuplicateRelation,
+            Self::UnknownRelation,
+            Self::UnknownColumn,
+            Self::Quirk,
+            Self::UnterminatedString,
+            Self::UnknownCharacter,
+            Self::InvalidNumericLiteral,
+            Self::InvalidBlob,
+            Self::Syntax,
+            Self::Semicolon,
+        ]
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::all().iter().copied().find(|rule| rule.name() == name)
+    }
+
     pub fn name(&self) -> &str {
         match self {
             Self::NoContent => "file/no-content",

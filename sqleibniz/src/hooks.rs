@@ -8,6 +8,17 @@ use crate::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+trait NodeHookContext {
+    fn as_hook_context(&self) -> HookContext;
+}
+
+impl NodeHookContext for dyn Node {
+    fn as_hook_context(&self) -> HookContext {
+        let location = self.location();
+        HookContext::node(self.name(), location.line, location.start, location.end)
+    }
+}
+
 fn hook_error_note(err: mlua::Error) -> String {
     match err {
         mlua::Error::RuntimeError(msg) => msg,

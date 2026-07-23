@@ -1,15 +1,15 @@
 use crate::{
     parser::nodes::*,
-    types::{Keyword, Token, Type, ctx::HookContext, storage::SqliteStorageClass},
+    types::{Keyword, Token, Type, storage::SqliteStorageClass},
 };
 
-/// impl FieldSerializable for $tt via serde_json::to_value(self).unwrap()
+/// impl FieldSerializable for $tt via serde_json::json!(format!("{self:?}"))
 macro_rules! impl_field_serializable_with_serde_to_value {
     ($($tt:tt),*) => {
         $(
             impl FieldSerializable for $tt {
                 fn field_as_serializable(&self) -> serde_json::Value {
-                    serde_json::to_value(self).unwrap()
+                    serde_json::json!(format!("{self:?}"))
                 }
             }
         )*
@@ -20,22 +20,6 @@ pub trait FieldSerializable {
     fn field_as_serializable(&self) -> serde_json::Value;
 }
 
-pub trait FieldHookContexts {
-    fn field_hook_contexts(&self) -> Vec<HookContext>;
-}
-
-macro_rules! impl_empty_field_hook_contexts {
-    ($($tt:ty),*) => {
-        $(
-            impl FieldHookContexts for $tt {
-                fn field_hook_contexts(&self) -> Vec<HookContext> {
-                    vec![]
-                }
-            }
-        )*
-    };
-}
-
 impl_field_serializable_with_serde_to_value!(
     String,
     bool,
@@ -43,7 +27,6 @@ impl_field_serializable_with_serde_to_value!(
     SqliteStorageClass,
     SchemaTableContainer,
     Type,
-    PragmaInvocation,
     IndexedColumn,
     QualifiedTableIndex,
     SelectQuantifier,
@@ -52,6 +35,12 @@ impl_field_serializable_with_serde_to_value!(
     TriggerEvent,
     TriggerBodyStmt
 );
+
+impl FieldSerializable for PragmaInvocation {
+    fn field_as_serializable(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap()
+    }
+}
 
 impl FieldSerializable for QualifiedTableName {
     fn field_as_serializable(&self) -> serde_json::Value {
@@ -69,7 +58,7 @@ impl FieldSerializable for ResultColumn {
             ResultColumn::Star => serde_json::json!({ "star": true }),
             ResultColumn::TableStar(table) => serde_json::json!({ "table_star": table }),
             ResultColumn::Expr { expr, alias } => serde_json::json!({
-                "expr": expr.as_serializable(),
+                "expr": expr.as_test_serializable(),
                 "alias": alias,
             }),
         }
@@ -101,7 +90,7 @@ impl FieldSerializable for SelectSource {
                     "left": left.field_as_serializable(),
                     "operator": operator,
                     "right": right.field_as_serializable(),
-                    "on": on.as_ref().map(|expr| expr.as_serializable()),
+                    "on": on.as_ref().map(|expr| expr.as_test_serializable()),
                 }
             }),
         }
@@ -111,7 +100,7 @@ impl FieldSerializable for SelectSource {
 impl FieldSerializable for OrderingTerm {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::json!({
-            "expr": self.expr.as_serializable(),
+            "expr": self.expr.as_test_serializable(),
             "order": self.order,
             "nulls": self.nulls,
         })
@@ -121,8 +110,8 @@ impl FieldSerializable for OrderingTerm {
 impl FieldSerializable for LimitOffset {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::json!({
-            "limit": self.limit.as_serializable(),
-            "offset": self.offset.as_ref().map(|expr| expr.as_serializable()),
+            "limit": self.limit.as_test_serializable(),
+            "offset": self.offset.as_ref().map(|expr| expr.as_test_serializable()),
         })
     }
 }
@@ -135,13 +124,13 @@ impl FieldSerializable for InsertSource {
                 rows.iter()
                     .map(|row| {
                         serde_json::Value::Array(
-                            row.iter().map(|expr| expr.as_serializable()).collect(),
+                            row.iter().map(|expr| expr.as_test_serializable()).collect(),
                         )
                     })
                     .collect(),
             ),
             InsertSource::Select(select) => serde_json::json!({
-                "select": select.as_serializable(),
+                "select": select.as_test_serializable(),
             }),
         }
     }
@@ -153,7 +142,7 @@ impl FieldSerializable for CommonTableExpression {
             "name": self.name,
             "columns": self.columns,
             "materialized": self.materialized,
-            "select": self.select.as_serializable(),
+            "select": self.select.as_test_serializable(),
         })
     }
 }
@@ -162,30 +151,8 @@ impl FieldSerializable for UpdateAssignment {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::json!({
             "columns": self.columns,
-            "expr": self.expr.as_serializable(),
+            "expr": self.expr.as_test_serializable(),
         })
-    }
-}
-
-impl FieldHookContexts for InsertSource {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            InsertSource::DefaultValues => vec![],
-            InsertSource::Values(rows) => rows.field_hook_contexts(),
-            InsertSource::Select(select) => vec![select.as_hook_context()],
-        }
-    }
-}
-
-impl FieldHookContexts for CommonTableExpression {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        vec![self.select.as_hook_context()]
-    }
-}
-
-impl FieldHookContexts for UpdateAssignment {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        self.expr.field_hook_contexts()
     }
 }
 
@@ -228,16 +195,16 @@ impl FieldSerializable for ColumnConstraint {
             }
             ColumnConstraint::Collate(str) => serde_json::json!(str),
             ColumnConstraint::Check(expr) => serde_json::json!({
-                "expr": expr.as_serializable(),
+                "expr": expr.as_test_serializable(),
             }),
             ColumnConstraint::Default { expr, literal } => {
                 serde_json::json!({
                     "expr": match expr {
-                        Some(e) => e.as_serializable(),
+                        Some(e) => e.as_test_serializable(),
                         None => serde_json::Value::Null,
                     },
                     "literal": match literal {
-                        Some(e) => e.as_serializable(),
+                        Some(e) => e.as_test_serializable(),
                         None => serde_json::Value::Null,
                     },
                 })
@@ -250,7 +217,7 @@ impl FieldSerializable for ColumnConstraint {
                 expr,
                 stored_virtual,
             } => serde_json::json!({
-                "expr": expr.as_serializable(),
+                "expr": expr.as_test_serializable(),
                 "stored_virtual": stored_virtual,
             }),
         };
@@ -283,7 +250,7 @@ impl FieldSerializable for TableConstraint {
             }),
             TableConstraint::Check(expr) => serde_json::json!({
                 "check": {
-                    "expr": expr.as_serializable(),
+                    "expr": expr.as_test_serializable(),
                 }
             }),
             TableConstraint::ForeignKey {
@@ -301,25 +268,13 @@ impl FieldSerializable for TableConstraint {
 
 impl FieldSerializable for Token {
     fn field_as_serializable(&self) -> serde_json::Value {
-        serde_json::to_value(&self.ttype).unwrap()
-    }
-}
-
-impl FieldHookContexts for Token {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        vec![HookContext::token(self)]
+        serde_json::json!(format!("{:?}", self.ttype))
     }
 }
 
 impl<T: Node + ?Sized> FieldSerializable for Box<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
-        self.as_serializable()
-    }
-}
-
-impl<T: Node + ?Sized> FieldHookContexts for Box<T> {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        vec![self.as_hook_context()]
+        self.as_test_serializable()
     }
 }
 
@@ -332,118 +287,8 @@ impl<T: FieldSerializable> FieldSerializable for Option<T> {
     }
 }
 
-impl<T: FieldHookContexts> FieldHookContexts for Option<T> {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            Some(n) => n.field_hook_contexts(),
-            None => vec![],
-        }
-    }
-}
-
 impl<T: FieldSerializable> FieldSerializable for Vec<T> {
     fn field_as_serializable(&self) -> serde_json::Value {
         serde_json::Value::Array(self.iter().map(|n| n.field_as_serializable()).collect())
-    }
-}
-
-impl<T: FieldHookContexts> FieldHookContexts for Vec<T> {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        self.iter().flat_map(|n| n.field_hook_contexts()).collect()
-    }
-}
-
-impl_empty_field_hook_contexts!(
-    String,
-    bool,
-    Keyword,
-    SqliteStorageClass,
-    SchemaTableContainer,
-    IndexedColumn,
-    QualifiedTableIndex,
-    SelectQuantifier,
-    JoinOperator,
-    SelectTable,
-    QualifiedTableName,
-    TriggerTiming,
-    TriggerEvent,
-    TriggerBodyStmt
-);
-
-impl FieldHookContexts for ResultColumn {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            ResultColumn::Expr { expr, .. } => expr.field_hook_contexts(),
-            ResultColumn::Star | ResultColumn::TableStar(_) => vec![],
-        }
-    }
-}
-
-impl FieldHookContexts for SelectSource {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            SelectSource::Table(_) => vec![],
-            SelectSource::Join { left, on, .. } => {
-                let mut contexts = left.field_hook_contexts();
-                if let Some(on) = on {
-                    contexts.extend(on.field_hook_contexts());
-                }
-                contexts
-            }
-        }
-    }
-}
-
-impl FieldHookContexts for OrderingTerm {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        self.expr.field_hook_contexts()
-    }
-}
-
-impl FieldHookContexts for LimitOffset {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        let mut contexts = self.limit.field_hook_contexts();
-        if let Some(offset) = &self.offset {
-            contexts.extend(offset.field_hook_contexts());
-        }
-        contexts
-    }
-}
-
-impl FieldHookContexts for PragmaInvocation {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            PragmaInvocation::Assign { value } | PragmaInvocation::Call { value } => {
-                value.field_hook_contexts()
-            }
-            PragmaInvocation::Query => vec![],
-        }
-    }
-}
-
-impl FieldHookContexts for ColumnConstraint {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            ColumnConstraint::Check(expr)
-            | ColumnConstraint::Default {
-                expr: Some(expr), ..
-            }
-            | ColumnConstraint::Generated { expr, .. }
-            | ColumnConstraint::As { expr, .. } => expr.field_hook_contexts(),
-            ColumnConstraint::Default {
-                literal: Some(literal),
-                ..
-            } => literal.field_hook_contexts(),
-            _ => vec![],
-        }
-    }
-}
-
-impl FieldHookContexts for TableConstraint {
-    fn field_hook_contexts(&self) -> Vec<HookContext> {
-        match self {
-            TableConstraint::Check(expr) => expr.field_hook_contexts(),
-            _ => vec![],
-        }
     }
 }

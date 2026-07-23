@@ -1,4 +1,3 @@
-pub mod ctx;
 mod keyword;
 pub mod rules;
 pub mod storage;
@@ -8,7 +7,8 @@ pub mod storage;
 /// private identifiers, rust you are fucking weird
 pub use self::keyword::Keyword;
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum Type {
     /// Any and all keywords sqlite3 allows for, such as `SELECT`, `FROM`, etc.
     ///
@@ -180,14 +180,15 @@ impl PartialEq for Type {
 
 impl Eq for Type {}
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct Token {
     pub ttype: Type,
-    #[serde(skip)]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub start: usize,
-    #[serde(skip)]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub end: usize,
-    #[serde(skip)]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub line: usize,
 }
 

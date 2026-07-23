@@ -62,8 +62,7 @@ struct Cli {
     /// disable diagnostics by their rules, all are enabled by default
     ///
     /// Defaults may change in the future
-    #[arg(short = 'D')]
-    #[clap(value_enum)]
+    #[arg(short = 'D', value_parser = parse_rule)]
     disable: Option<Vec<Rule>>,
 
     /// skip AST analysis diagnostics after parsing
@@ -90,6 +89,10 @@ struct Cli {
 
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+fn parse_rule(value: &str) -> Result<Rule, String> {
+    Rule::from_name(value).ok_or_else(|| format!("unknown diagnostic rule `{value}`"))
 }
 
 struct FileResult {
@@ -259,15 +262,7 @@ fn main() {
             }
 
             if args.ast_json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(
-                        &ast.iter()
-                            .map(|n| n.as_ref().as_serializable())
-                            .collect::<Vec<_>>()
-                    )
-                    .unwrap_or_default()
-                );
+                println!("{}", serde_json::to_string_pretty(&ast).unwrap_or_default());
             }
 
             if args.ast {

@@ -1,5 +1,3 @@
-use clap::ValueEnum;
-
 use crate::{parser::nodes, types::rules::Rule};
 
 pub struct Explanation {
@@ -152,7 +150,7 @@ const SQL_STATEMENTS: &[SqlStatement] = &[
 ];
 
 pub fn lookup(name: &str) -> Option<Explanation> {
-    Rule::value_variants()
+    Rule::all()
         .iter()
         .find(|rule| rule.name() == name)
         .map(|rule| Explanation {
@@ -166,7 +164,7 @@ pub fn lookup(name: &str) -> Option<Explanation> {
 }
 
 pub fn rules() -> Vec<Explanation> {
-    Rule::value_variants()
+    Rule::all()
         .iter()
         .map(|rule| Explanation {
             kind: ExplanationKind::Rule,

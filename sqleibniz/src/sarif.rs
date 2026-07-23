@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use clap::ValueEnum;
 use serde_json::{Value, json};
 
 use crate::{error::Error, types::rules::Rule};
@@ -9,10 +8,7 @@ const SARIF_SCHEMA: &str =
     "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json";
 
 pub fn log(errors: &[Error]) -> Value {
-    let rules = Rule::value_variants()
-        .iter()
-        .map(rule_descriptor)
-        .collect::<Vec<_>>();
+    let rules = Rule::all().iter().map(rule_descriptor).collect::<Vec<_>>();
 
     json!({
         "$schema": SARIF_SCHEMA,

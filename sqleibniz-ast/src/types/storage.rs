@@ -1,9 +1,8 @@
 use std::fmt::Display;
 
-use serde::Serialize;
-
 /// see: https://sqlite.org/datatype3.html#storage_classes_and_datatypes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum SqliteStorageClass {
     Null,
     Integer,

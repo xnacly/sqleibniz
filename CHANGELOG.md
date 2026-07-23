@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.0.5
+
+### Added
+
+- Add the standalone `sqleibniz-ast` crate (`v0.0.1`) for SQLite tokens, lexer, parser, AST nodes, and recoverable parse diagnostics.
+- Add `sqleibniz_ast::parse`, a one-step parsing API returning tokens, AST nodes, and diagnostics.
+- Add package documentation and a usage guide for `sqleibniz-ast`.
+
+### Changed
+
+- Move sqleibniz's syntax layer into `sqleibniz-ast`; semantic analysis, Lua hooks, the CLI, and LSP remain in `sqleibniz`.
+- Retain sqleibniz's parser, lexer, diagnostic, highlighting, and syntax-type module paths as compatibility re-exports.
+
 ## v0.0.4
 
 ### Added

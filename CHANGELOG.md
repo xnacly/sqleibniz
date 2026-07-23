@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.7
+
+### Breaking
+
+- Remove all `sqleibniz` compatibility re-exports for syntax modules and types. Use `sqleibniz-ast` directly for parsing, lexing, diagnostics, highlighting, and syntax types.
+
 ## v0.0.6
 
 ### Changed

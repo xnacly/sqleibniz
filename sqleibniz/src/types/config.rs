@@ -104,7 +104,7 @@ pub struct Hook {
     /// matcher limits which hook contexts execute the hook.
     /// Omitting it executes the hook for every encountered context.
     pub matcher: Option<HookMatch>,
-    /// hook can be executed via [Function::exec]`(arg)`, where args is [HookContext]
+    /// hook can be executed via `Function::call(arg)`, where args is [HookContext]
     pub hook: Option<Function>,
 }
 

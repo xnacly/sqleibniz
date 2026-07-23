@@ -5,12 +5,14 @@ use std::time::SystemTime;
 use std::{fs, process::exit, vec};
 
 use clap::{Parser, Subcommand};
-use sqleibniz::error::{self, Error, print_str_colored, warn};
-use sqleibniz::highlight::builder;
-use sqleibniz::lexer::Lexer;
-use sqleibniz::parser;
 use sqleibniz::types::config::Config;
-use sqleibniz::types::rules::Rule;
+use sqleibniz_ast::{
+    error::{self, Error, print_str_colored, warn},
+    highlight::builder,
+    lexer::Lexer,
+    parser,
+    types::rules::Rule,
+};
 
 #[derive(Subcommand)]
 enum Command {

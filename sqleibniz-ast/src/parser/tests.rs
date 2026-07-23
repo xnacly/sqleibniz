@@ -2671,6 +2671,8 @@ mod should_fail {
 
 #[cfg(test)]
 mod should_analyze {
+    // Semantic analysis belongs to the consumer crate, not the syntax crate.
+    #[cfg(any())]
     test_group_analysis_assert! {
         diagnostic_tests,
         create_table_recommends_strict:
@@ -2729,6 +2731,7 @@ mod should_analyze {
             "PRAGMA some_extension_pragma;" => Rule::UnknownPragma, "SQLite ignores unknown PRAGMAs"
     }
 
+    #[cfg(any())]
     test_group_analysis_pass! {
         negative_diagnostic_tests,
         create_table_strict_has_no_recommendation:

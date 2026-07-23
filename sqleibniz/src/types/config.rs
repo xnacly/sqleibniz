@@ -130,4 +130,3 @@ impl FromLua for HookMatch {
 }
 
 impl UserData for Config {}
-impl UserData for Rule {}

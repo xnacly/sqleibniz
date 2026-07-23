@@ -504,8 +504,20 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
- "sqleibniz-proc 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqleibniz-ast",
  "toml",
+]
+
+[[package]]
+name = "sqleibniz-ast"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "mlua",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sqleibniz-proc 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

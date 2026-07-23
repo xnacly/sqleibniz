@@ -1,7 +1,8 @@
-use crate::analyse::{AnalysisContext, fields::FieldDiagnostics};
-use crate::error::{Error, Location};
-use crate::parser::debug::{FieldHookContexts, FieldSerializable};
-use crate::types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass};
+use crate::{
+    error::Location,
+    parser::debug::{FieldHookContexts, FieldSerializable},
+    types::{Keyword, Token, ctx::HookContext, storage::SqliteStorageClass},
+};
 
 macro_rules! field_hook_contexts {
     () => {
@@ -16,35 +17,6 @@ macro_rules! field_hook_contexts {
         .into_iter()
         .flatten()
         .collect::<Vec<HookContext>>()
-    };
-}
-
-macro_rules! field_diagnostics {
-    ($file:expr, $context:expr,) => {
-        {
-            let _ = $file;
-            let _ = $context;
-            Vec::new()
-        }
-    };
-    ($file:expr, $context:expr, $($field:expr),+ $(,)?) => {
-        vec![
-            $(
-                $field.field_diagnostics($file, $context),
-            )+
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<Error>>()
-    };
-}
-
-macro_rules! node_diagnostics {
-    ($file:expr, $context:expr, [$($field:expr),*], $analyser:path, $node:expr) => {{
-        $analyser($file, $context, $node)
-    }};
-    ($file:expr, $context:expr, [$($field:expr),*], $node:expr) => {
-        field_diagnostics!($file, $context, $($field),*)
     };
 }
 
@@ -111,14 +83,11 @@ macro_rules! node {
                 Self::DOC
             }
 
-            fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-                crate::analyse::analyse_node(self, file, context, |file, context| {
-                    node_diagnostics!(file, context, [$(self.$field_name),*] $(, $analyser)?, self)
-                })
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
             }
         }
 
-        #[cfg(test)]
         impl $node_name {
             pub fn new($($field_name: $field_type,)*) -> Self {
                 Self {
@@ -142,7 +111,7 @@ macro_rules! node {
     };
 }
 
-pub trait Node: std::fmt::Debug {
+pub trait Node: std::fmt::Debug + std::any::Any {
     fn location(&self) -> Location;
     #[cfg(feature = "trace")]
     fn display(&self, indent: usize);
@@ -153,12 +122,8 @@ pub trait Node: std::fmt::Debug {
     fn as_hook_context(&self) -> HookContext;
     /// returns the documentation url for sefl
     fn doc(&self) -> &str;
-    /// returns diagnostics found by analysing this node after parsing
-    fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-        let _ = file;
-        let _ = context;
-        Vec::new()
-    }
+    /// Returns this node as `Any` for consumers that need type-specific behavior.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 node!(

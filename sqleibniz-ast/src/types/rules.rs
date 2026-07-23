@@ -60,6 +60,8 @@ pub enum Rule {
     Semicolon,
 }
 
+impl mlua::UserData for Rule {}
+
 pub struct RuleExample {
     pub sql: &'static str,
     pub explanation: &'static str,

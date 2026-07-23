@@ -1,9 +1,8 @@
 use crate::{
-    analyse::{AnalysisContext, Column, RelationKind},
+    analyse::{Analyse, AnalysisContext, Column, RelationKind},
     error::{Error, Location},
     parser::nodes::{
-        Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, Node,
-        SchemaTableContainer,
+        Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, SchemaTableContainer,
     },
     parser::nodes::{ColumnConstraint, ColumnDef, TableConstraint},
     types::{rules::Rule, storage::SqliteStorageClass},

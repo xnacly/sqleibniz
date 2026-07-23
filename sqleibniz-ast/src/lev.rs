@@ -1,4 +1,4 @@
-/// Computes Levenshtein distance
+/// Computes Levenshtein distance.
 ///
 /// meaning the difference between two strings as the minimum number of single-character edits
 /// (insertions, deletions or substitutions) required to change one word into the other

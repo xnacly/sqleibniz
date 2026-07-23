@@ -16,21 +16,19 @@ fn error_range(error: &Error) -> Range {
     )
 }
 
-impl From<Error> for Diagnostic {
-    fn from(value: Error) -> Self {
-        Self {
-            range: error_range(&value),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(lsp_types::NumberOrString::String(
-                value.rule.name().to_string(),
-            )),
-            code_description: None,
-            source: Some("sqleibniz".into()),
-            message: format!("{}: {}", value.msg, value.note),
-            related_information: None,
-            tags: None,
-            data: None,
-        }
+fn diagnostic(value: Error) -> Diagnostic {
+    Diagnostic {
+        range: error_range(&value),
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(lsp_types::NumberOrString::String(
+            value.rule.name().to_string(),
+        )),
+        code_description: None,
+        source: Some("sqleibniz".into()),
+        message: format!("{}: {}", value.msg, value.note),
+        related_information: None,
+        tags: None,
+        data: None,
     }
 }
 
@@ -42,7 +40,7 @@ pub fn handle(
 ) -> Result<(), LspError> {
     let diagnostics = lsp_types::FullDocumentDiagnosticReport {
         result_id: None,
-        items: errors.into_iter().map(Error::into).collect(),
+        items: errors.into_iter().map(diagnostic).collect(),
     };
     let result = serde_json::to_value(&diagnostics)
         .map_err(|err| format!("failed to serialize diagnostics: {err}"))?;

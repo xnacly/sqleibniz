@@ -1,5 +1,5 @@
 use crate::{
-    analyse::{AnalysisContext, Relation, RelationKind},
+    analyse::{Analyse, AnalysisContext, Relation, RelationKind},
     error::{Error, Location},
     parser::nodes::{
         Delete, Expr, Insert, InsertSource, Node, QualifiedTableName, ResultColumn,

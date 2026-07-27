@@ -3,6 +3,7 @@ use crate::{
     types::{Token, Type},
 };
 
+/// builder holds the string builder diagnostics and highlighted sql are written to
 pub mod builder;
 
 trait Highlight {
@@ -44,8 +45,8 @@ impl Highlight for Color {
     }
 }
 
-/// highlight performs syntax highlighting on the given [line], depending on the tokens in
-/// [token_on_line]. The generated output is writen to the [builder::Builder], thats passed into
+/// highlight performs syntax highlighting on the given `line`, depending on the tokens in
+/// `token_on_line`. The generated output is writen to the [builder::Builder], thats passed into
 /// the function
 pub fn highlight(builder: &mut builder::Builder, token_on_line: &[&Token], line: &str) {
     // no tokens on a line means: either comment or empty line

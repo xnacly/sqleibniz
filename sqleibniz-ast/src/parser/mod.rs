@@ -24,10 +24,17 @@ thread_local! {
     static CALL_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
 }
 
+/// Parser turns the token stream of [crate::Lexer] into the abstract syntax tree, see
+/// [Parser::parse]
+///
+/// Parsing is recoverable: a statement the parser can not make sense of is reported in
+/// [Parser::errors] and skipped up to the next semicolon, the statements around it are still
+/// parsed.
 pub struct Parser<'a> {
     pos: usize,
     tokens: Vec<Token>,
     name: &'a str,
+    /// diagnostics collected while parsing, check these after [Parser::parse]
     pub errors: Vec<Error>,
 }
 
@@ -122,17 +129,19 @@ const FOREIGN_KEY_DOC: &str = "https://www.sqlite.org/syntax/foreign-key-clause.
 ///
 /// The top-level flow mirrors SQLite's statement grammar:
 ///
-/// - [`Parser::sql_stmt_list`] parses a sequence of semicolon-terminated statements.
-/// - [`Parser::sql_stmt_prefix`] handles optional statement prefixes such as `EXPLAIN`.
-/// - [`Parser::sql_stmt`] dispatches to the concrete `<name>_stmt` parser.
+/// - `sql_stmt_list` parses a sequence of semicolon-terminated statements.
+/// - `sql_stmt_prefix` handles optional statement prefixes such as `EXPLAIN`.
+/// - `sql_stmt` dispatches to the concrete `<name>_stmt` parser.
 ///
 /// Concrete statement parser names intentionally follow SQLite documentation names where possible.
 ///
 /// ## See:
 ///
-/// - https://www.sqlite.org/lang.html
-/// - https://www.sqlite.org/lang_expr.html
+/// - <https://www.sqlite.org/lang.html>
+/// - <https://www.sqlite.org/lang_expr.html>
 impl<'a> Parser<'a> {
+    /// new creates a Parser for the given token stream, name is the file name diagnostics are
+    /// reported for
     pub fn new(tokens: Vec<Token>, name: &'a str) -> Parser<'a> {
         Parser {
             pos: 0,
@@ -354,6 +363,8 @@ impl<'a> Parser<'a> {
         value
     }
 
+    /// parse parses the token stream into the statements it holds and collects everything it could
+    /// not parse in [Parser::errors]
     #[cfg_attr(feature = "trace", trace)]
     pub fn parse(&mut self) -> Vec<Box<dyn nodes::Node>> {
         self.sql_stmt_list()
@@ -366,7 +377,7 @@ impl<'a> Parser<'a> {
     /// are handled here because they suppress the next complete statement rather than a single
     /// syntax production.
     ///
-    /// See: https://www.sqlite.org/syntax/sql-stmt-list.html
+    /// See: <https://www.sqlite.org/syntax/sql-stmt-list.html>
     #[cfg_attr(feature = "trace", trace)]
     fn sql_stmt_list(&mut self) -> Vec<Box<dyn nodes::Node>> {
         let mut r = vec![];
@@ -429,7 +440,7 @@ impl<'a> Parser<'a> {
     /// Unsupported statement keywords are reported as `sqleibniz/unimplemented` diagnostics. This
     /// keeps the unsupported surface explicit without adding parser stubs that panic at runtime.
     ///
-    /// See: https://www.sqlite.org/syntax/sql-stmt.html
+    /// See: <https://www.sqlite.org/syntax/sql-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn sql_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         match self.cur().ttype {
@@ -550,7 +561,7 @@ impl<'a> Parser<'a> {
     /// - expression indexes
     /// - partial indexes
     ///
-    /// See: https://www.sqlite.org/lang_create.html
+    /// See: <https://www.sqlite.org/lang_create.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -607,7 +618,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/lang_createtable.html
+    /// <https://www.sqlite.org/lang_createtable.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_table_stmt(
         &mut self,
@@ -698,7 +709,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_createvtab.html
+    /// <https://www.sqlite.org/lang_createvtab.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_virtual_table_stmt(
         &mut self,
@@ -756,7 +767,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_createvtab.html
+    /// <https://www.sqlite.org/lang_createvtab.html>
     #[cfg_attr(feature = "trace", trace)]
     fn virtual_table_module_arguments(&mut self) -> Option<Vec<Token>> {
         let mut arguments = vec![];
@@ -811,7 +822,7 @@ impl<'a> Parser<'a> {
         Some(arguments)
     }
 
-    /// https://www.sqlite.org/syntax/table-options.html
+    /// <https://www.sqlite.org/syntax/table-options.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_table_options(&mut self) -> (bool, bool) {
         let mut strict = false;
@@ -868,7 +879,7 @@ impl<'a> Parser<'a> {
         (strict, without_rowid)
     }
 
-    /// https://www.sqlite.org/lang_createindex.html
+    /// <https://www.sqlite.org/lang_createindex.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_index_stmt(
         &mut self,
@@ -972,7 +983,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_createview.html
+    /// <https://www.sqlite.org/lang_createview.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_view_stmt(
         &mut self,
@@ -1071,7 +1082,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn create_trigger_stmt(
         &mut self,
@@ -1119,7 +1130,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_timing(&mut self) -> Option<Option<nodes::TriggerTiming>> {
         match self.cur().ttype {
@@ -1161,7 +1172,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_event(&mut self) -> Option<nodes::TriggerEvent> {
         match self.cur().ttype {
@@ -1203,7 +1214,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_column_list(&mut self) -> Option<Vec<String>> {
         let mut columns = vec![];
@@ -1233,7 +1244,7 @@ impl<'a> Parser<'a> {
         Some(columns)
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_for_each_row(&mut self) -> bool {
         // no FOR EACH ROW
@@ -1247,7 +1258,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_when_clause(&mut self) -> bool {
         // no WHEN clause
@@ -1285,7 +1296,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_body(&mut self) -> Vec<nodes::TriggerBodyStmt> {
         let mut body = vec![];
@@ -1340,7 +1351,7 @@ impl<'a> Parser<'a> {
         body
     }
 
-    /// https://www.sqlite.org/lang_createtrigger.html
+    /// <https://www.sqlite.org/lang_createtrigger.html>
     #[cfg_attr(feature = "trace", trace)]
     fn trigger_body_stmt_kind(&mut self) -> Option<nodes::TriggerBodyStmt> {
         match self.cur().ttype {
@@ -1369,7 +1380,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/indexed-column.html
+    /// <https://www.sqlite.org/syntax/indexed-column.html>
     #[cfg_attr(feature = "trace", trace)]
     fn indexed_column(&mut self) -> Option<nodes::IndexedColumn> {
         let name = match self.cur().ttype.clone() {
@@ -1421,7 +1432,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/pragma.html
+    /// <https://www.sqlite.org/pragma.html>
     #[cfg_attr(feature = "trace", trace)]
     fn pragma_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -1481,7 +1492,7 @@ impl<'a> Parser<'a> {
         some_box!(pragma)
     }
 
-    /// https://www.sqlite.org/lang_altertable.html
+    /// <https://www.sqlite.org/lang_altertable.html>
     #[cfg_attr(feature = "trace", trace)]
     fn alter_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Alter {
@@ -1567,7 +1578,7 @@ impl<'a> Parser<'a> {
         some_box!(a)
     }
 
-    /// https://www.sqlite.org/syntax/reindex-stmt.html
+    /// <https://www.sqlite.org/syntax/reindex-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn reindex_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Reindex {
@@ -1588,7 +1599,7 @@ impl<'a> Parser<'a> {
         some_box!(r)
     }
 
-    /// https://www.sqlite.org/syntax/attach-stmt.html
+    /// <https://www.sqlite.org/syntax/attach-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn attach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -1615,7 +1626,7 @@ impl<'a> Parser<'a> {
         some_box!(a)
     }
 
-    /// https://www.sqlite.org/syntax/release-stmt.html
+    /// <https://www.sqlite.org/syntax/release-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn release_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut r = nodes::Release {
@@ -1638,7 +1649,7 @@ impl<'a> Parser<'a> {
         some_box!(r)
     }
 
-    /// https://www.sqlite.org/syntax/savepoint-stmt.html
+    /// <https://www.sqlite.org/syntax/savepoint-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn savepoint_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut s = nodes::Savepoint {
@@ -1655,10 +1666,10 @@ impl<'a> Parser<'a> {
         some_box!(s)
     }
 
-    /// https://www.sqlite.org/lang_dropindex.html
-    /// https://www.sqlite.org/lang_droptable.html
-    /// https://www.sqlite.org/lang_droptrigger.html
-    /// https://www.sqlite.org/lang_dropview.html
+    /// <https://www.sqlite.org/lang_dropindex.html>
+    /// <https://www.sqlite.org/lang_droptable.html>
+    /// <https://www.sqlite.org/lang_droptrigger.html>
+    /// <https://www.sqlite.org/lang_dropview.html>
     #[cfg_attr(feature = "trace", trace)]
     fn drop_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -1719,7 +1730,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/syntax/analyze-stmt.html
+    /// <https://www.sqlite.org/syntax/analyze-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn analyze_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut a = nodes::Analyze {
@@ -1738,7 +1749,7 @@ impl<'a> Parser<'a> {
         some_box!(a)
     }
 
-    /// https://www.sqlite.org/syntax/common-table-expression.html
+    /// <https://www.sqlite.org/syntax/common-table-expression.html>
     #[cfg_attr(feature = "trace", trace)]
     fn with_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -1785,7 +1796,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_select.html
+    /// <https://www.sqlite.org/lang_select.html>
     #[cfg_attr(feature = "trace", trace)]
     fn select_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let select = self.select()?;
@@ -1793,7 +1804,7 @@ impl<'a> Parser<'a> {
         some_box!(select)
     }
 
-    /// https://www.sqlite.org/lang_select.html
+    /// <https://www.sqlite.org/lang_select.html>
     #[cfg_attr(feature = "trace", trace)]
     fn select(&mut self) -> Option<nodes::Select> {
         let location = Location::from(self.cur());
@@ -1868,7 +1879,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/lang_select.html#removal_of_duplicate_rows_distinct_processing
+    /// <https://www.sqlite.org/lang_select.html#removal_of_duplicate_rows_distinct_processing>
     #[cfg_attr(feature = "trace", trace)]
     fn select_quantifier(&mut self) -> Option<nodes::SelectQuantifier> {
         // DISTINCT | ALL
@@ -1885,7 +1896,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/table-or-subquery.html
+    /// <https://www.sqlite.org/syntax/table-or-subquery.html>
     #[cfg_attr(feature = "trace", trace)]
     fn simple_from_clause(&mut self) -> Option<Vec<nodes::SelectSource>> {
         let mut sources = vec![];
@@ -1932,7 +1943,7 @@ impl<'a> Parser<'a> {
         Some(sources)
     }
 
-    /// https://www.sqlite.org/syntax/table-or-subquery.html and https://www.sqlite.org/syntax/join-clause.html
+    /// <https://www.sqlite.org/syntax/table-or-subquery.html> and <https://www.sqlite.org/syntax/join-clause.html>
     #[cfg_attr(feature = "trace", trace)]
     fn select_source(&mut self) -> Option<nodes::SelectSource> {
         // <table-or-subquery>
@@ -1958,7 +1969,7 @@ impl<'a> Parser<'a> {
         Some(source)
     }
 
-    /// https://www.sqlite.org/syntax/table-or-subquery.html
+    /// <https://www.sqlite.org/syntax/table-or-subquery.html>
     #[cfg_attr(feature = "trace", trace)]
     fn select_table(&mut self) -> Option<nodes::SelectTable> {
         // (<select-stmt>)
@@ -1992,7 +2003,7 @@ impl<'a> Parser<'a> {
         Some(nodes::SelectTable { name, alias })
     }
 
-    /// https://www.sqlite.org/syntax/join-operator.html
+    /// <https://www.sqlite.org/syntax/join-operator.html>
     #[cfg_attr(feature = "trace", trace)]
     fn join_operator(&mut self) -> Option<Option<nodes::JoinOperator>> {
         // JOIN | INNER JOIN | LEFT [OUTER] JOIN | CROSS JOIN
@@ -2038,7 +2049,7 @@ impl<'a> Parser<'a> {
             || self.is_keyword(Keyword::FULL)
     }
 
-    /// https://www.sqlite.org/lang_select.html#the_group_by_clause
+    /// <https://www.sqlite.org/lang_select.html#the_group_by_clause>
     #[cfg_attr(feature = "trace", trace)]
     fn group_by_clause(&mut self) -> Option<Vec<nodes::Expr>> {
         let mut expressions = vec![];
@@ -2073,7 +2084,7 @@ impl<'a> Parser<'a> {
         Some(expressions)
     }
 
-    /// https://www.sqlite.org/lang_select.html
+    /// <https://www.sqlite.org/lang_select.html>
     #[cfg_attr(feature = "trace", trace)]
     fn push_unimplemented_select_feature(&mut self, note: &'static str, doc: &'static str) {
         let src = Location::from(self.cur());
@@ -2081,7 +2092,7 @@ impl<'a> Parser<'a> {
         self.skip_until_semicolon_or_eof();
     }
 
-    /// https://www.sqlite.org/lang_insert.html
+    /// <https://www.sqlite.org/lang_insert.html>
     #[cfg_attr(feature = "trace", trace)]
     fn insert_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -2124,7 +2135,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/syntax/insert-stmt.html
+    /// <https://www.sqlite.org/syntax/insert-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn statement_conflict_algorithm(&mut self, statement: &'static str) -> Option<Option<Keyword>> {
         // OR ROLLBACK | OR ABORT | OR REPLACE | OR FAIL | OR IGNORE
@@ -2154,7 +2165,7 @@ impl<'a> Parser<'a> {
         )?))
     }
 
-    /// https://www.sqlite.org/lang_insert.html
+    /// <https://www.sqlite.org/lang_insert.html>
     #[cfg_attr(feature = "trace", trace)]
     fn insert_source(&mut self) -> Option<nodes::InsertSource> {
         // DEFAULT VALUES
@@ -2188,7 +2199,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    /// https://www.sqlite.org/syntax/expr.html
+    /// <https://www.sqlite.org/syntax/expr.html>
     #[cfg_attr(feature = "trace", trace)]
     fn insert_values_rows(&mut self) -> Option<Vec<Vec<nodes::Expr>>> {
         let mut rows = vec![];
@@ -2218,7 +2229,7 @@ impl<'a> Parser<'a> {
         Some(rows)
     }
 
-    /// https://www.sqlite.org/syntax/expr.html
+    /// <https://www.sqlite.org/syntax/expr.html>
     #[cfg_attr(feature = "trace", trace)]
     fn insert_values_row(&mut self) -> Option<Vec<nodes::Expr>> {
         // (<expr>, ...)
@@ -2265,7 +2276,7 @@ impl<'a> Parser<'a> {
         Some(values)
     }
 
-    /// https://www.sqlite.org/lang_upsert.html
+    /// <https://www.sqlite.org/lang_upsert.html>
     #[cfg_attr(feature = "trace", trace)]
     fn reject_insert_upsert_clause(&mut self) -> Option<Box<dyn nodes::Node>> {
         let src = Location::from(self.cur());
@@ -2280,7 +2291,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    /// https://www.sqlite.org/lang_update.html
+    /// <https://www.sqlite.org/lang_update.html>
     #[cfg_attr(feature = "trace", trace)]
     fn update_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -2325,7 +2336,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/syntax/update-stmt.html
+    /// <https://www.sqlite.org/syntax/update-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn update_assignment_list(&mut self) -> Option<Vec<nodes::UpdateAssignment>> {
         let mut assignments = vec![];
@@ -2361,7 +2372,7 @@ impl<'a> Parser<'a> {
         Some(assignments)
     }
 
-    /// https://www.sqlite.org/syntax/update-stmt.html
+    /// <https://www.sqlite.org/syntax/update-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn update_assignment(&mut self) -> Option<nodes::UpdateAssignment> {
         // (<column-name>, ...)
@@ -2381,7 +2392,7 @@ impl<'a> Parser<'a> {
         Some(nodes::UpdateAssignment { columns, expr })
     }
 
-    /// https://www.sqlite.org/lang_update.html#upfrom
+    /// <https://www.sqlite.org/lang_update.html#upfrom>
     #[cfg_attr(feature = "trace", trace)]
     fn reject_update_from_clause(&mut self) -> Option<Box<dyn nodes::Node>> {
         let src = Location::from(self.cur());
@@ -2396,7 +2407,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    /// https://www.sqlite.org/lang_delete.html
+    /// <https://www.sqlite.org/lang_delete.html>
     #[cfg_attr(feature = "trace", trace)]
     fn delete_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -2430,7 +2441,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/syntax/common-table-expression.html
+    /// <https://www.sqlite.org/syntax/common-table-expression.html>
     #[cfg_attr(feature = "trace", trace)]
     fn common_table_expression(&mut self) -> Option<nodes::CommonTableExpression> {
         // <table-name>
@@ -2472,7 +2483,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// https://www.sqlite.org/syntax/qualified-table-name.html
+    /// <https://www.sqlite.org/syntax/qualified-table-name.html>
     #[cfg_attr(feature = "trace", trace)]
     fn qualified_table_name(&mut self) -> Option<nodes::QualifiedTableName> {
         // [schema-name.]table-name
@@ -2510,7 +2521,7 @@ impl<'a> Parser<'a> {
         Some(nodes::QualifiedTableName { name, alias, index })
     }
 
-    /// https://www.sqlite.org/syntax/expr.html
+    /// <https://www.sqlite.org/syntax/expr.html>
     #[cfg_attr(feature = "trace", trace)]
     fn optional_where_clause(&mut self) -> Option<Option<nodes::Expr>> {
         if self.consume_if_keyword(Keyword::WHERE) {
@@ -2520,7 +2531,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/returning-clause.html
+    /// <https://www.sqlite.org/syntax/returning-clause.html>
     #[cfg_attr(feature = "trace", trace)]
     fn optional_returning_clause(&mut self) -> Option<Vec<nodes::ResultColumn>> {
         if self.consume_if_keyword(Keyword::RETURNING) {
@@ -2530,7 +2541,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/ordering-term.html
+    /// <https://www.sqlite.org/syntax/ordering-term.html>
     #[cfg_attr(feature = "trace", trace)]
     fn optional_order_by_clause(&mut self) -> Option<Vec<nodes::OrderingTerm>> {
         if self.consume_if_keyword(Keyword::ORDER) {
@@ -2541,7 +2552,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/delete-stmt-limited.html and https://www.sqlite.org/syntax/update-stmt-limited.html
+    /// <https://www.sqlite.org/syntax/delete-stmt-limited.html> and <https://www.sqlite.org/syntax/update-stmt-limited.html>
     #[cfg_attr(feature = "trace", trace)]
     fn optional_limit_offset_clause(&mut self) -> Option<Option<nodes::LimitOffset>> {
         if self.consume_if_keyword(Keyword::LIMIT) {
@@ -2551,7 +2562,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/result-column.html
+    /// <https://www.sqlite.org/syntax/result-column.html>
     #[cfg_attr(feature = "trace", trace)]
     fn result_column_list(&mut self) -> Option<Vec<nodes::ResultColumn>> {
         let mut columns = vec![];
@@ -2589,7 +2600,7 @@ impl<'a> Parser<'a> {
         Some(columns)
     }
 
-    /// https://www.sqlite.org/syntax/result-column.html
+    /// <https://www.sqlite.org/syntax/result-column.html>
     #[cfg_attr(feature = "trace", trace)]
     fn result_column(&mut self) -> Option<nodes::ResultColumn> {
         // *
@@ -2629,7 +2640,7 @@ impl<'a> Parser<'a> {
         Some(nodes::ResultColumn::Expr { expr, alias })
     }
 
-    /// https://www.sqlite.org/syntax/ordering-term.html
+    /// <https://www.sqlite.org/syntax/ordering-term.html>
     #[cfg_attr(feature = "trace", trace)]
     fn ordering_term_list(&mut self) -> Option<Vec<nodes::OrderingTerm>> {
         let mut terms = vec![];
@@ -2659,7 +2670,7 @@ impl<'a> Parser<'a> {
         Some(terms)
     }
 
-    /// https://www.sqlite.org/syntax/ordering-term.html
+    /// <https://www.sqlite.org/syntax/ordering-term.html>
     #[cfg_attr(feature = "trace", trace)]
     fn ordering_term(&mut self) -> Option<nodes::OrderingTerm> {
         // <expr>
@@ -2682,7 +2693,7 @@ impl<'a> Parser<'a> {
         Some(nodes::OrderingTerm { expr, order, nulls })
     }
 
-    /// https://www.sqlite.org/syntax/delete-stmt-limited.html and https://www.sqlite.org/syntax/update-stmt-limited.html
+    /// <https://www.sqlite.org/syntax/delete-stmt-limited.html> and <https://www.sqlite.org/syntax/update-stmt-limited.html>
     #[cfg_attr(feature = "trace", trace)]
     fn limit_offset_clause(&mut self) -> Option<nodes::LimitOffset> {
         // LIMIT <expr>
@@ -2700,7 +2711,7 @@ impl<'a> Parser<'a> {
         Some(nodes::LimitOffset { limit, offset })
     }
 
-    /// https://www.sqlite.org/syntax/detach-stmt.html
+    /// <https://www.sqlite.org/syntax/detach-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn detach_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let location = Location::from(self.cur());
@@ -2724,7 +2735,7 @@ impl<'a> Parser<'a> {
         some_box!(d)
     }
 
-    /// https://www.sqlite.org/syntax/rollback-stmt.html
+    /// <https://www.sqlite.org/syntax/rollback-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn rollback_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut rollback = nodes::Rollback {
@@ -2799,7 +2810,7 @@ impl<'a> Parser<'a> {
         some_box!(rollback)
     }
 
-    /// https://www.sqlite.org/syntax/commit-stmt.html
+    /// <https://www.sqlite.org/syntax/commit-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn commit_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let commit: Option<Box<dyn nodes::Node>> = some_box!(nodes::Commit {
@@ -2835,7 +2846,7 @@ impl<'a> Parser<'a> {
         commit
     }
 
-    /// https://www.sqlite.org/syntax/begin-stmt.html
+    /// <https://www.sqlite.org/syntax/begin-stmt.html>
     #[cfg_attr(feature = "trace", trace)]
     fn begin_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut begin: nodes::Begin = nodes::Begin {
@@ -2905,7 +2916,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/lang_vacuum.html
+    /// <https://www.sqlite.org/lang_vacuum.html>
     #[cfg_attr(feature = "trace", trace)]
     fn vacuum_stmt(&mut self) -> Option<Box<dyn nodes::Node>> {
         let mut v = nodes::Vacuum {
@@ -2976,7 +2987,7 @@ impl<'a> Parser<'a> {
         some_box!(v)
     }
 
-    /// see: https://www.sqlite.org/syntax/literal-value.html
+    /// see: <https://www.sqlite.org/syntax/literal-value.html>
     #[cfg_attr(feature = "trace", trace)]
     fn literal_value(&mut self) -> Option<nodes::Literal> {
         let cur = self.cur();
@@ -3007,7 +3018,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// parses an sql expression: https://www.sqlite.org/syntax/expr.html
+    /// parses an sql expression: <https://www.sqlite.org/syntax/expr.html>
     #[cfg_attr(feature = "trace", trace)]
     fn expr(&mut self) -> Option<nodes::Expr> {
         self.expr_bp(0)
@@ -3019,7 +3030,7 @@ impl<'a> Parser<'a> {
     /// and identifier-led column/function expressions. The surrounding parser decides where an
     /// expression must stop by leaving `)`, `,`, and statement terminators out of the operator set.
     ///
-    /// See: https://www.sqlite.org/lang_expr.html
+    /// See: <https://www.sqlite.org/lang_expr.html>
     #[cfg_attr(feature = "trace", trace)]
     fn expr_bp(&mut self, min_bp: u8) -> Option<nodes::Expr> {
         let mut lhs = self.expr_prefix()?;
@@ -3361,7 +3372,7 @@ impl<'a> Parser<'a> {
     /// Operators are handled by the surrounding Pratt parser; this function consumes only the
     /// identifier-led primary expression before operator binding continues.
     ///
-    /// See: https://www.sqlite.org/lang_expr.html
+    /// See: <https://www.sqlite.org/lang_expr.html>
     #[cfg_attr(feature = "trace", trace)]
     fn ident_expr(&mut self) -> Option<nodes::Expr> {
         let location = Location::from(self.cur());
@@ -3428,7 +3439,7 @@ impl<'a> Parser<'a> {
 
     /// Parses `function-arguments` inside an already consumed opening parenthesis.
     ///
-    /// See: https://www.sqlite.org/syntax/function-arguments.html
+    /// See: <https://www.sqlite.org/syntax/function-arguments.html>
     #[cfg_attr(feature = "trace", trace)]
     fn expr_arguments(&mut self) -> Option<Vec<nodes::Expr>> {
         let mut arguments = vec![];
@@ -3562,7 +3573,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/conflict-clause.html
+    /// <https://www.sqlite.org/syntax/conflict-clause.html>
     #[cfg_attr(feature = "trace", trace)]
     fn conflict_clause(&mut self) -> Option<Keyword> {
         if self.is_keyword(Keyword::ON) {
@@ -3611,7 +3622,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    /// https://www.sqlite.org/syntax/foreign-key-clause.html but specifically the ON and MATCH paths.
+    /// <https://www.sqlite.org/syntax/foreign-key-clause.html> but specifically the ON and MATCH paths.
     #[cfg_attr(feature = "trace", trace)]
     fn foreign_key_clause_on_and_match(&mut self, fk: &mut ForeignKeyClause) {
         loop {
@@ -3733,7 +3744,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/foreign-key-clause.html and https://sqlite.org/foreignkeys.html
+    /// <https://www.sqlite.org/syntax/foreign-key-clause.html> and <https://sqlite.org/foreignkeys.html>
     #[cfg_attr(feature = "trace", trace)]
     fn foreign_key_clause(&mut self) -> Option<ForeignKeyClause> {
         let mut fk = ForeignKeyClause {
@@ -3899,7 +3910,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// https://www.sqlite.org/syntax/table-constraint.html
+    /// <https://www.sqlite.org/syntax/table-constraint.html>
     #[cfg_attr(feature = "trace", trace)]
     fn table_constraint(&mut self) -> Option<nodes::TableConstraint> {
         // CONSTRAINT <name>
@@ -3965,7 +3976,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/indexed-column.html
+    /// <https://www.sqlite.org/syntax/indexed-column.html>
     #[cfg_attr(feature = "trace", trace)]
     fn indexed_column_list(&mut self, constraint_name: &str) -> Option<Vec<nodes::IndexedColumn>> {
         let mut columns = vec![];
@@ -4006,7 +4017,7 @@ impl<'a> Parser<'a> {
         Some(columns)
     }
 
-    /// https://www.sqlite.org/syntax/column-name-list.html
+    /// <https://www.sqlite.org/syntax/column-name-list.html>
     #[cfg_attr(feature = "trace", trace)]
     fn column_name_list(&mut self, constraint_name: &str) -> Option<Vec<String>> {
         let mut columns = vec![];
@@ -4208,7 +4219,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// https://www.sqlite.org/syntax/column-def.html
+    /// <https://www.sqlite.org/syntax/column-def.html>
     #[cfg_attr(feature = "trace", trace)]
     fn column_def(&mut self) -> Option<nodes::ColumnDef> {
         let mut def = nodes::ColumnDef {

@@ -5,20 +5,29 @@ use crate::{
     types::{Token, rules::Rule},
 };
 
+/// ImprovedLine holds the fix a diagnostic suggests for the line it points at
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImprovedLine {
+    /// sql to insert into the faulty line
     pub snippet: &'static str,
+    /// offset into the faulty line the snippet is inserted at
     pub start: usize,
 }
 
+/// Location points into the source file a token or node came from
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Location {
+    /// zero based line index, add one before displaying it
     pub line: usize,
+    /// zero based offset into [Location::line] the token or node starts at
     pub start: usize,
+    /// zero based offset into [Location::line] the token or node ends at, used to underline the
+    /// faulty snippet in a diagnostic
     pub end: usize,
 }
 
 impl Location {
+    /// new creates a Location from a zero based line index and the offsets into that line
     pub fn new(line: usize, start: usize, end: usize) -> Self {
         Self { line, start, end }
     }
@@ -34,18 +43,29 @@ impl From<&Token> for Location {
     }
 }
 
+/// Error is a diagnostic the lexer or the parser reported, it does not necessarily stop either of
+/// them, see [crate::ParseResult]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Error {
+    /// name of the source file the diagnostic was reported for
     pub file: String,
+    /// position in the source file the diagnostic points at
     pub location: Location,
+    /// group the diagnostic belongs to, can be disabled from the CLI or leibniz.lua
     pub rule: Rule,
+    /// explains why the diagnostic was reported and how to fix it
     pub note: String,
+    /// short description of what is wrong
     pub msg: String,
+    /// fix for the faulty line, if the lexer or parser knows one
     pub improved_line: Option<ImprovedLine>,
+    /// link to the sqlite documentation for the construct the diagnostic was reported for
     pub doc_url: Option<&'static str>,
 }
 
+/// Color is an ansi escape code used for diagnostics and syntax highlighting
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub enum Color {
     Reset,
 
@@ -64,6 +84,7 @@ pub enum Color {
 }
 
 impl Color {
+    /// as_str returns the ansi escape code for self
     pub fn as_str(&self) -> &str {
         match self {
             Self::Reset => "\x1b[0m",
@@ -80,6 +101,7 @@ impl Color {
     }
 }
 
+/// warn writes s to the builder, prefixed with a yellow `warn`
 pub fn warn(b: &mut builder::Builder, s: &str) {
     print_str_colored(b, "warn", Color::Yellow);
     b.write_str(": ");
@@ -87,6 +109,7 @@ pub fn warn(b: &mut builder::Builder, s: &str) {
     b.write_char('\n');
 }
 
+/// err writes s to the builder, prefixed with a red `error`
 pub fn err(b: &mut builder::Builder, s: &str) {
     print_str_colored(b, "error", Color::Red);
     b.write_str(": ");
@@ -94,6 +117,7 @@ pub fn err(b: &mut builder::Builder, s: &str) {
     b.write_char('\n');
 }
 
+/// print_str_colored writes s to the builder, wrapped in the escape codes for c
 pub fn print_str_colored(b: &mut builder::Builder, s: &str, c: Color) {
     b.write_str(c.as_str());
     b.write_str(s);
@@ -101,6 +125,7 @@ pub fn print_str_colored(b: &mut builder::Builder, s: &str, c: Color) {
 }
 
 impl Error {
+    /// new creates a diagnostic without a documentation link and without a suggested fix
     pub fn new(
         file: impl Into<String>,
         location: impl Into<Location>,
@@ -119,11 +144,16 @@ impl Error {
         }
     }
 
+    /// with_doc_url attaches the sqlite documentation for the faulty construct to the diagnostic
     pub fn with_doc_url(mut self, doc_url: &'static str) -> Self {
         self.doc_url = Some(doc_url);
         self
     }
 
+    /// print renders the diagnostic into the builder: message, file position, the faulty snippet
+    /// with two lines of context, the note and the documentation link
+    ///
+    /// content is the source of [Error::file], tokens are used to syntax highlight the snippet
     pub fn print(&mut self, b: &mut builder::Builder, content: &[u8], tokens: &[Token]) {
         print_str_colored(b, self.rule.name(), Color::Red);
         b.write_str(": ");

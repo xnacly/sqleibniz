@@ -1,27 +1,29 @@
 # sqleibniz-ast
 
-SQLite syntax primitives, lexer, parser, and abstract syntax tree.
+Parse SQLite into tokens, an abstract syntax tree (AST), and diagnostics.
 
-`sqleibniz-ast` is the syntax layer behind
-[sqleibniz](https://github.com/xnacly/sqleibniz). It parses the SQLite syntax
-that sqleibniz understands and returns the tokens, AST, and recoverable
-diagnostics together. It does so via handwritten tokenisation and recursive
-descent parsing.
+`sqleibniz-ast` is the standalone syntax layer of
+[sqleibniz](https://github.com/xnacly/sqleibniz). It uses a handwritten lexer
+and recursive-descent parser, follows SQLite's documented syntax, and recovers
+from errors where possible. It is intended for tools that need to inspect SQL,
+such as linters, editors, formatters, and source analyzers.
 
 > [!WARNING]
-> This crate is under active development. Its public API and supported SQLite
+> The crate is under active development. Its public API and supported SQLite
 > grammar may change before 1.0.
 
-## Usage
-
-Add the crate to your project:
+## Installation
 
 ```toml
 [dependencies]
 sqleibniz-ast = "0.0.2"
 ```
 
-Use [`parse`] for the usual one-step workflow:
+## Parse SQL
+
+`sqleibniz_ast::parse` is the usual entry point. It always returns the lexer output, parsed
+statements, and any diagnostics, allowing tools to retain useful syntax even
+while a source file is incomplete or invalid.
 
 ```rust
 use sqleibniz_ast::parse;
@@ -31,40 +33,106 @@ let parsed = parse(
     "schema.sql",
 );
 
-if parsed.is_ok() {
-    assert_eq!(parsed.ast.len(), 2);
-} else {
-    for diagnostic in parsed.errors {
-        eprintln!("{}:{}: {}", diagnostic.file, diagnostic.location.line + 1, diagnostic.msg);
-    }
-}
+assert!(parsed.is_ok());
+assert_eq!(parsed.ast.len(), 2);
+assert!(!parsed.tokens.is_empty());
 ```
 
 `ParseResult` contains:
 
-- `tokens`: the token stream produced by the lexer;
+- `tokens`: the lexer output;
 - `ast`: successfully parsed statements as `Box<dyn Node>`;
-- `errors`: lexer and parser diagnostics, including a source location, rule,
-  note, and SQLite documentation link where available.
+- `errors`: lexer and parser diagnostics.
 
-The parser recovers where it can. An AST can therefore be non-empty even when
-`errors` is non-empty—useful for editors and other tools that must work with
-incomplete SQL.
+Parsing is recoverable, so `ast` may be non-empty when `errors` is non-empty.
+Report the diagnostics before accepting SQL as valid:
 
-Enable the optional `serde` feature to serialize AST nodes directly with
-Serde:
+```rust
+use sqleibniz_ast::parse;
+
+let parsed = parse("SELECT FROM users;", "query.sql");
+
+for diagnostic in &parsed.errors {
+    eprintln!(
+        "{}:{}: {}",
+        diagnostic.file,
+        diagnostic.location.line + 1,
+        diagnostic.msg,
+    );
+}
+```
+
+## Serialize AST as JSON
+
+Enable the `serde` feature and add a JSON serializer to your application:
 
 ```toml
+[dependencies]
+serde_json = "1"
 sqleibniz-ast = { version = "0.0.2", features = ["serde"] }
 ```
 
-For lower-level control, use `Lexer::new(...).run()` and then
-`Parser::new(tokens, name).parse()` directly. AST node definitions are exposed
-from `sqleibniz_ast::parser::nodes`.
+AST nodes serialize as JSON objects with a `type` field. This makes the output
+suited to debugging, snapshots, and integrations with tools outside Rust.
+
+```rust
+use sqleibniz_ast::parse;
+
+let parsed = parse("SELECT id FROM users;", "query.sql");
+assert!(parsed.is_ok());
+
+let json = serde_json::to_string_pretty(&parsed.ast)?;
+println!("{json}");
+```
+
+```json
+[
+  {
+    "type": "Select",
+    "quantifier": null,
+    "columns": [
+      {
+        "Expr": {
+          "expr": {
+            "type": "Expr",
+            "literal": null,
+            "bind": null,
+            "schema": null,
+            "table": null,
+            "column": "id",
+            "function": null,
+            "operator": null,
+            "arguments": []
+          },
+          "alias": null
+        }
+      }
+    ],
+    "from": [
+      {
+        "Table": {
+          "name": {
+            "Table": "users"
+          },
+          "alias": null
+        }
+      }
+    ],
+    "where_expr": null,
+    "group_by": [],
+    "having": null,
+    "order_by": [],
+    "limit": null
+  }
+]
+```
+
+The serialized AST is a representation of the crate's public syntax model; it
+is not a stable wire format before 1.0.
 
 ## Scope
 
-The crate follows SQLite's documented syntax diagrams and shares the same
-statement coverage as sqleibniz's syntax analysis. See the parent project's
+The parser follows SQLite's documented syntax diagrams and shares the syntax
+coverage of sqleibniz. See the parent project's
 [supported statement matrix](https://github.com/xnacly/sqleibniz#supported-sql-statements)
 for the current coverage.

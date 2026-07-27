@@ -23,7 +23,7 @@ pub enum Rule {
     UnknownRelation,
     /// Source file references a column not defined on a known table
     UnknownColumn,
-    /// Sqlite or SQL quirk: https://www.sqlite.org/quirks.html; anything where SQLite deviates
+    /// Sqlite or SQL quirk: <https://www.sqlite.org/quirks.html>; anything where SQLite deviates
     /// from a stricter, conventional SQL model
     Quirk,
     /// Source file contains an unterminated string
@@ -41,12 +41,16 @@ pub enum Rule {
     Semicolon,
 }
 
+/// RuleExample is sql that triggers a [Rule] and the explanation of why it does
 pub struct RuleExample {
+    /// sql that triggers the rule
     pub sql: &'static str,
+    /// explains what the rule reports for the sql above
     pub explanation: &'static str,
 }
 
 impl Rule {
+    /// all returns every rule, this is the list the CLI and leibniz.lua accept names from
     pub const fn all() -> &'static [Self] {
         &[
             Self::NoContent,
@@ -70,10 +74,12 @@ impl Rule {
         ]
     }
 
+    /// from_name returns the rule with the given name, such as `file/no-content`
     pub fn from_name(name: &str) -> Option<Self> {
         Self::all().iter().copied().find(|rule| rule.name() == name)
     }
 
+    /// name returns the name self is disabled by, such as `file/no-content`
     pub fn name(&self) -> &str {
         match self {
             Self::NoContent => "file/no-content",
@@ -97,6 +103,7 @@ impl Rule {
         }
     }
 
+    /// description returns a single sentence explaining what self reports
     pub fn description(&self) -> &str {
         match self {
             Self::NoContent => "Source file is empty",
@@ -128,6 +135,7 @@ impl Rule {
         }
     }
 
+    /// examples returns sql that triggers self, together with the explanation for each snippet
     pub fn examples(&self) -> &'static [RuleExample] {
         match self {
             Self::NoContent => &[RuleExample {

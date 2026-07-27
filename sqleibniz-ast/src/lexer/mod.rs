@@ -5,16 +5,28 @@ use crate::types::{Keyword, Token, Type, rules::Rule};
 
 mod tests;
 
+/// Lexer turns sql source into a token stream, see [Lexer::run]
+///
+/// Lexing is recoverable: unknown characters, unterminated strings and bad literals are pushed to
+/// [Lexer::errors] and lexing continues with the next token.
+///
+/// ## See:
+///
+/// - <https://www.sqlite.org/lang_keywords.html>
+/// - <https://www.sqlite.org/lang_expr.html#literal_values_constants_>
 pub struct Lexer<'a> {
     pos: usize,
     line: usize,
     line_pos: usize,
     name: &'a str,
     source: &'a Vec<u8>,
+    /// diagnostics collected while lexing, check these after [Lexer::run]
     pub errors: Vec<Error>,
 }
 
 impl<'a> Lexer<'a> {
+    /// new creates a Lexer for the given source, name is the file name diagnostics are reported
+    /// for
     pub fn new(source: &'a Vec<u8>, name: &'a str) -> Lexer<'a> {
         Lexer {
             pos: 0,
@@ -68,7 +80,7 @@ impl<'a> Lexer<'a> {
         self.pos >= self.source.len()
     }
 
-    /// Specifically matches https://www.sqlite.org/syntax/numeric-literal.html
+    /// Specifically matches <https://www.sqlite.org/syntax/numeric-literal.html>
     fn is_sqlite_num(&self) -> bool {
         // exponent notation with +-
         // sqlite allows for separating numbers by _
@@ -154,6 +166,8 @@ impl<'a> Lexer<'a> {
         )))
     }
 
+    /// run lexes the whole source into a token stream, terminated by [crate::Type::Eof], and
+    /// collects everything it could not lex in [Lexer::errors]
     pub fn run(&mut self) -> Vec<Token> {
         let mut r = vec![];
         if self.source.is_empty() {

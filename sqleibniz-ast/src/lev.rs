@@ -3,7 +3,7 @@
 /// meaning the difference between two strings as the minimum number of single-character edits
 /// (insertions, deletions or substitutions) required to change one word into the other
 ///
-/// see: https://en.wikipedia.org/wiki/Levenshtein_distance
+/// see: <https://en.wikipedia.org/wiki/Levenshtein_distance>
 pub fn distance(a: &[u8], b: &[u8]) -> usize {
     if a.is_empty() {
         return b.len();

@@ -1,14 +1,22 @@
 use std::fmt::Display;
 
-/// see: https://sqlite.org/datatype3.html#storage_classes_and_datatypes
+/// SqliteStorageClass is the storage class a column value is stored as
+///
+/// see: <https://sqlite.org/datatype3.html#storage_classes_and_datatypes>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum SqliteStorageClass {
+    /// NULL
     Null,
+    /// signed integer, stored in one to eight bytes
     Integer,
+    /// floating point value, stored as an eight byte IEEE float
     Real,
+    /// text, stored in the database encoding
     Text,
+    /// blob, stored exactly as it was passed in
     Blob,
+    /// ANY, a STRICT table column that accepts every storage class
     Any,
 }
 
@@ -42,7 +50,10 @@ impl Display for SqliteStorageClass {
 }
 
 impl SqliteStorageClass {
-    /// https://sqlite.org/datatype3.html#determination_of_column_affinity
+    /// from_str determines the column affinity of the type name s, falling back to
+    /// [SqliteStorageClass::Blob] for type names sqlite does not know
+    ///
+    /// see: <https://sqlite.org/datatype3.html#determination_of_column_affinity>
     pub fn from_str(s: &str) -> Self {
         if s.contains_any(vec!["VARCHAR", "CLOB", "TEXT"]) {
             Self::Text
@@ -60,6 +71,8 @@ impl SqliteStorageClass {
         }
     }
 
+    /// from_str_strict returns the storage class s names, `None` for anything that is not one of
+    /// the storage classes a STRICT table accepts
     pub fn from_str_strict(s: &str) -> Option<Self> {
         Some(match s {
             "TEXT" => Self::Text,

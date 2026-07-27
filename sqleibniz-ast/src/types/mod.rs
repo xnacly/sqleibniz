@@ -1,5 +1,7 @@
 mod keyword;
+/// rules holds the groups diagnostics are reported under and can be disabled by
 pub mod rules;
+/// storage holds the storage classes a column value can have
 pub mod storage;
 
 #[allow(unused_imports)]
@@ -7,14 +9,16 @@ pub mod storage;
 /// private identifiers, rust you are fucking weird
 pub use self::keyword::Keyword;
 
+/// Type is the kind of a [Token], either a keyword, a literal, an identifier or a symbol
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub enum Type {
     /// Any and all keywords sqlite3 allows for, such as `SELECT`, `FROM`, etc.
     ///
     /// ## See:
-    /// - https://www.sqlite.org/lang_keywords.html
+    /// - <https://www.sqlite.org/lang_keywords.html>
     Keyword(keyword::Keyword),
+    /// Identifier, such as a table, column or schema name
     Ident(String),
     /// If a numeric literal has a decimal point or an exponentiation clause or if it is less than -9223372036854775808 or greater than 9223372036854775807, then it is a floating point literal.
     /// Otherwise is it is an integer literal. The "E" character that begins the exponentiation clause of a floating point literal can be either upper or lower case.
@@ -33,14 +37,14 @@ pub enum Type {
     /// SQLite only understands the hexadecimal integer notation when it appears in the SQL statement text, not when it appears as part of the content of the database.
     ///
     /// ## See:
-    /// - https://www.sqlite.org/lang_expr.html#literal_values_constants_
-    /// - https://www.sqlite.org/syntax/numeric-literal.html
+    /// - <https://www.sqlite.org/lang_expr.html#literal_values_constants_>
+    /// - <https://www.sqlite.org/syntax/numeric-literal.html>
     Number(f64),
     ///  A string constant is formed by enclosing the string in single quotes (').
     ///  C-style escapes using the backslash character are not supported because they are not standard SQL.
     ///
     /// ## See:
-    /// - https://www.sqlite.org/lang_expr.html#literal_values_constants_
+    /// - <https://www.sqlite.org/lang_expr.html#literal_values_constants_>
     String(String),
     ///
     /// BLOB literals are string literals containing hexadecimal data and preceded by a single "x" or "X" character.
@@ -51,13 +55,13 @@ pub enum Type {
     ///
     /// ## See:
     ///
-    /// - https://www.sqlite.org/lang_expr.html#literal_values_constants_
+    /// - <https://www.sqlite.org/lang_expr.html#literal_values_constants_>
     Blob(Vec<u8>),
     /// The boolean identifiers TRUE and FALSE are usually just aliases for the integer values 1 and 0, respectively.
     ///
     /// ## See:
     ///
-    /// - https://www.sqlite.org/lang_expr.html#boolean_expressions
+    /// - <https://www.sqlite.org/lang_expr.html#boolean_expressions>
     Boolean(bool),
     /// Parameters for sqlite3_bind() function, expression to be filled at runtime with parameter number.
     /// Count can not exceed `SQLITE_MAX_VARIABLE_NUMBER`.
@@ -70,9 +74,9 @@ pub enum Type {
     /// ```
     ///
     /// ## See:
-    /// - https://www.sqlite.org/limits.html#max_variable_number
-    /// - https://www.sqlite.org/c3ref/bind_blob.html
-    /// - https://www.sqlite.org/lang_expr.html#parameters
+    /// - <https://www.sqlite.org/limits.html#max_variable_number>
+    /// - <https://www.sqlite.org/c3ref/bind_blob.html>
+    /// - <https://www.sqlite.org/lang_expr.html#parameters>
     ParamName(String),
     /// Parameters for sqlite3_bind() function, expression to be filled at runtime with parameter number.
     /// Only '?' increments the parameter counter by one. Count can not exceed `SQLITE_MAX_VARIABLE_NUMBER`.
@@ -83,46 +87,78 @@ pub enum Type {
     /// ```
     ///
     /// ## See:
-    /// - https://www.sqlite.org/limits.html#max_variable_number
-    /// - https://www.sqlite.org/c3ref/bind_blob.html
-    /// - https://www.sqlite.org/lang_expr.html#parameters
+    /// - <https://www.sqlite.org/limits.html#max_variable_number>
+    /// - <https://www.sqlite.org/c3ref/bind_blob.html>
+    /// - <https://www.sqlite.org/lang_expr.html#parameters>
     Param(usize),
 
+    /// `.`
     Dot,
+    /// `+`
     Plus,
+    /// `-`
     Minus,
+    /// `*`
     Asterisk,
+    /// `/`
     Slash,
+    /// `;`
     Semicolon,
+    /// `%`
     Percent,
+    /// `,`
     Comma,
+    /// `=`
     Equal,
+    /// `==`
     EqualEqual,
+    /// `<`
     Less,
+    /// `<=`
     LessEqual,
+    /// `>`
     Greater,
+    /// `>=`
     GreaterEqual,
+    /// `!=` or `<>`
     NotEqual,
+    /// `||`, string concatenation
     PipePipe,
+    /// `&`
     Ampersand,
+    /// `|`
     Pipe,
+    /// `~`
     Tilde,
+    /// `<<`
     ShiftLeft,
+    /// `>>`
     ShiftRight,
+    /// `->`, json extraction
     Arrow,
+    /// `->>`, json extraction
     ArrowArrow,
+    /// `?`
     Question,
+    /// `:`
     Colon,
+    /// `@`
     At,
+    /// `$`
     Dollar,
+    /// `(`
     BraceLeft,
+    /// `)`
     BraceRight,
+    /// `[`
     BracketLeft,
+    /// `]`
     BracketRight,
 
     /// Instructs the parser to skip all token until Type::Semicolon is hit
     InstructionExpect,
 
+    /// End of the token stream, [crate::Lexer::run] terminates every stream with this
     Eof,
 }
 
@@ -180,14 +216,21 @@ impl PartialEq for Type {
 
 impl Eq for Type {}
 
+/// Token is a lexed piece of sql source and its position in the source file
+///
+/// The position is not serialised, serialising a token only keeps [Token::ttype].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 pub struct Token {
+    /// kind of the token and the value it holds
     pub ttype: Type,
+    /// zero based offset into [Token::line] the token starts at
     #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub start: usize,
+    /// zero based offset into [Token::line] the token ends at
     #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub end: usize,
+    /// zero based line index, add one before displaying it
     #[cfg_attr(any(test, feature = "serde"), serde(skip))]
     pub line: usize,
 }
@@ -216,12 +259,16 @@ impl Token {
         }
     }
 
+    /// is_pragma_boolean returns whether self spells a PRAGMA boolean, see
+    /// [Token::pragma_boolean]
     pub fn is_pragma_boolean(&self) -> bool {
         self.pragma_boolean().is_some()
     }
 }
 
 impl Token {
+    /// new creates a token of the given type at line 0, offset 0, use this for tokens that were
+    /// not lexed from a source file
     pub fn new(ttype: Type) -> Self {
         Self {
             ttype,

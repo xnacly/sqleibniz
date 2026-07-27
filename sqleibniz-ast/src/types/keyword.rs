@@ -1,9 +1,16 @@
 use crate::lev;
 
+/// Keyword is a keyword sqlite understands, variants are named after the keyword itself
+///
+/// ## See:
+///
+/// - <https://www.sqlite.org/lang_keywords.html>
 #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Copy)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
+// every variant is named after the keyword it stands for, documenting them adds nothing
+#[allow(missing_docs)]
 pub enum Keyword {
     ABORT,
     ACTION,
@@ -358,6 +365,8 @@ impl Keyword {
         best[..len].iter().map(|(k, _)| *k).collect()
     }
 
+    /// from_str returns the keyword s spells, casing is ignored, `None` for anything that is not a
+    /// keyword
     pub fn from_str(s: &str) -> Option<Keyword> {
         Some(match s.to_uppercase().as_str() {
             "ABORT" => Keyword::ABORT,

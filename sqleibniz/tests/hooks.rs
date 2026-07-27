@@ -76,6 +76,32 @@ leibniz = {
     )
 }
 
+fn slow_hook_config(max_hook_runtime: Option<&str>) -> TempFile {
+    let max_hook_runtime = max_hook_runtime
+        .map(|value| format!("max_hook_runtime = {value},"))
+        .unwrap_or_default();
+    temp_file(
+        "slow-hook",
+        "lua",
+        &format!(
+            r#"
+leibniz = {{
+    {max_hook_runtime}
+    hooks = {{
+        {{
+            name = "slow hook",
+            match = {{ node = "Token", kind = "Ident" }},
+            hook = function(_)
+                while true do end
+            end
+        }}
+    }}
+}}
+"#,
+        ),
+    )
+}
+
 #[test]
 fn hook_error_reports_diagnostic() {
     let config = lowercase_hook_config();
@@ -150,4 +176,55 @@ leibniz = {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("ExpectedName"));
     assert!(stdout.contains("ReportedName"));
+}
+
+#[test]
+fn hooks_time_out_after_the_default_runtime() {
+    let config = slow_hook_config(None);
+    let sql = temp_file("slow-hook-default", "sql", "VACUUM name;");
+
+    let output = sqleibniz(&[
+        arg("--kiss"),
+        arg("--config"),
+        file_arg(&config),
+        file_arg(&sql),
+    ]);
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("slow hook"));
+    assert!(stdout.contains("maximum runtime of 10ms"));
+}
+
+#[test]
+fn config_sets_the_hook_runtime() {
+    let config = slow_hook_config(Some("1"));
+    let sql = temp_file("slow-hook-config", "sql", "VACUUM name;");
+
+    let output = sqleibniz(&[
+        arg("--kiss"),
+        arg("--config"),
+        file_arg(&config),
+        file_arg(&sql),
+    ]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("maximum runtime of 1ms"));
+}
+
+#[test]
+fn cli_hook_runtime_overrides_config() {
+    let config = slow_hook_config(Some("1000"));
+    let sql = temp_file("slow-hook-cli", "sql", "VACUUM name;");
+
+    let output = sqleibniz(&[
+        arg("--kiss"),
+        arg("--config"),
+        file_arg(&config),
+        arg("--max-hook-runtime=0ms"),
+        file_arg(&sql),
+    ]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("maximum runtime of 0ms"));
 }

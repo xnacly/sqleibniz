@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.8
+
+### Added
+
+- Limit each Lua hook invocation to 10 ms by default, configurable with
+  `leibniz.max_hook_runtime` or the `--max-hook-runtime` CLI option.
+
+### Changed
+
+- Release `sqleibniz-ast` `v0.0.3` with the current syntax API documentation.
+
 ## v0.0.7
 
 ### Breaking

@@ -2,10 +2,10 @@
 
 #[cfg(feature = "trace")]
 use std::time::SystemTime;
-use std::{fs, process::exit, vec};
+use std::{fs, process::exit, time::Duration, vec};
 
 use clap::{Parser, Subcommand};
-use sqleibniz::types::config::Config;
+use sqleibniz::types::config::{Config, parse_max_hook_runtime};
 use sqleibniz_ast::{
     error::{self, Error, print_str_colored, warn},
     highlight::builder,
@@ -89,6 +89,10 @@ struct Cli {
     #[arg(long, requires = "lsp")]
     lsp_enable_hooks: bool,
 
+    /// maximum runtime for one Lua hook invocation (for example, 10ms)
+    #[arg(long, value_parser = parse_max_hook_runtime)]
+    max_hook_runtime: Option<Duration>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -155,7 +159,7 @@ fn main() {
     }
 
     if args.lsp {
-        if let Err(e) = sqleibniz::lsp::start(args.lsp_enable_hooks) {
+        if let Err(e) = sqleibniz::lsp::start(args.lsp_enable_hooks, args.max_hook_runtime) {
             panic!("fatal error in language server: {}", e);
         }
         return;
@@ -190,6 +194,10 @@ fn main() {
                 }
             }
         }
+    }
+
+    if let Some(max_hook_runtime) = args.max_hook_runtime {
+        config.max_hook_runtime = max_hook_runtime;
     }
 
     if let Some(rules) = args.disable {
@@ -277,8 +285,13 @@ fn main() {
             }
 
             if let Some(hooks) = config.hooks.as_deref() {
-                errors.append(&mut sqleibniz::hooks::run(
-                    &lua, &file.name, hooks, &ast, &toks,
+                errors.append(&mut sqleibniz::hooks::run_with_max_hook_runtime(
+                    &lua,
+                    &file.name,
+                    hooks,
+                    &ast,
+                    &toks,
+                    config.max_hook_runtime,
                 ));
             }
         }

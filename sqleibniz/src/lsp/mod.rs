@@ -1,7 +1,7 @@
 mod error;
 mod handlers;
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use error::LspError;
 use lsp_server::{
@@ -32,7 +32,7 @@ macro_rules! lsp_log {
     };
 }
 
-pub fn start(enable_hooks: bool) -> Result<(), LspError> {
+pub fn start(enable_hooks: bool, max_hook_runtime: Option<Duration>) -> Result<(), LspError> {
     lsp_log!("starting language server");
     let (connection, threads) = Connection::stdio();
     let capabilities = serde_json::to_value(&ServerCapabilities {
@@ -72,7 +72,7 @@ pub fn start(enable_hooks: bool) -> Result<(), LspError> {
         }
     };
 
-    event_loop(connection, init_params, enable_hooks)?;
+    event_loop(connection, init_params, enable_hooks, max_hook_runtime)?;
 
     threads
         .join()
@@ -88,11 +88,28 @@ struct DocumentState {
     errors: Vec<super::error::Error>,
 }
 
+#[cfg(test)]
 fn analyze_document(
     text: &[u8],
     name: &str,
     hooks: Option<&[Hook]>,
     lua: Option<&mlua::Lua>,
+) -> DocumentState {
+    analyze_document_with_max_hook_runtime(
+        text,
+        name,
+        hooks,
+        lua,
+        crate::types::config::DEFAULT_MAX_HOOK_RUNTIME,
+    )
+}
+
+fn analyze_document_with_max_hook_runtime(
+    text: &[u8],
+    name: &str,
+    hooks: Option<&[Hook]>,
+    lua: Option<&mlua::Lua>,
+    max_hook_runtime: Duration,
 ) -> DocumentState {
     let text = text.to_vec();
     let mut l = Lexer::new(&text, name);
@@ -103,7 +120,14 @@ fn analyze_document(
     errors.append(&mut p.errors);
     errors.append(&mut crate::analyse::run(name, &ast));
     if let (Some(hooks), Some(lua)) = (hooks, lua) {
-        errors.append(&mut hooks::run(lua, name, hooks, &ast, &tokens));
+        errors.append(&mut hooks::run_with_max_hook_runtime(
+            lua,
+            name,
+            hooks,
+            &ast,
+            &tokens,
+            max_hook_runtime,
+        ));
     }
 
     DocumentState { ast, errors }
@@ -118,11 +142,12 @@ fn event_loop(
     connection: Connection,
     params: serde_json::Value,
     enable_hooks: bool,
+    max_hook_runtime: Option<Duration>,
 ) -> Result<(), LspError> {
     let params: InitializeParams = serde_json::from_value(params)
         .map_err(|err| format!("failed to parse initialize params: {err}"))?;
     lsp_log!("starting event loop");
-    let config = load_config(&params, enable_hooks);
+    let config = load_config(&params, enable_hooks, max_hook_runtime);
     let mut documents = HashMap::<String, DocumentState>::new();
     for msg in &connection.receiver {
         match msg {
@@ -195,11 +220,12 @@ fn event_loop(
                                 let formatted_path = uri.replace("file://", "");
                                 documents.insert(
                                     uri,
-                                    analyze_document(
+                                    analyze_document_with_max_hook_runtime(
                                         change.text.as_bytes(),
                                         &formatted_path,
                                         config.config.hooks.as_deref(),
                                         config._lua.as_ref(),
+                                        config.config.max_hook_runtime,
                                     ),
                                 );
                             }
@@ -214,11 +240,12 @@ fn event_loop(
                             let formatted_path = uri.replace("file://", "");
                             documents.insert(
                                 uri,
-                                analyze_document(
+                                analyze_document_with_max_hook_runtime(
                                     params.text_document.text.as_bytes(),
                                     &formatted_path,
                                     config.config.hooks.as_deref(),
                                     config._lua.as_ref(),
+                                    config.config.max_hook_runtime,
                                 ),
                             );
                         }
@@ -232,7 +259,11 @@ fn event_loop(
     Ok(())
 }
 
-fn load_config(params: &InitializeParams, enable_hooks: bool) -> LspConfig {
+fn load_config(
+    params: &InitializeParams,
+    enable_hooks: bool,
+    max_hook_runtime: Option<Duration>,
+) -> LspConfig {
     let path = config_path(params);
     let lua = mlua::Lua::new();
     let loaded_config = if enable_hooks {
@@ -242,7 +273,10 @@ fn load_config(params: &InitializeParams, enable_hooks: bool) -> LspConfig {
     };
 
     match loaded_config {
-        Ok(config) => {
+        Ok(mut config) => {
+            if let Some(max_hook_runtime) = max_hook_runtime {
+                config.max_hook_runtime = max_hook_runtime;
+            }
             eprintln!("[sqleibniz]: loaded config from {}", path.display());
             LspConfig {
                 config,

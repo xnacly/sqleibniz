@@ -19,6 +19,10 @@
 sqleibniz = sqleibniz
 
 leibniz = {
+    -- Maximum execution time for one custom hook invocation. Accepts milliseconds
+    -- as a number or a string such as "10ms". The default is 10ms.
+    max_hook_runtime = "10ms",
+
     disabled_rules = {
         -- Ignore project-level diagnostics by default.
         "file/no-content",           -- source file is empty

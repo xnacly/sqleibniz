@@ -130,6 +130,12 @@ Each hook runs for contexts matching every field in `match`. Token hooks can
 use `node.content` for the token text and report a diagnostic by calling
 `sqleibniz.diagnostic(node, "message")`.
 
+Each hook invocation is limited to 10 ms by default, preventing an accidental
+infinite Lua loop from blocking analysis. Set `max_hook_runtime` in the
+configuration to a number of milliseconds (for example, `max_hook_runtime =
+50`) or a string such as `"50ms"`. Pass `--max-hook-runtime 50ms` to override
+the configuration for one CLI or language-server invocation.
+
 ### sqleibniz instructions
 
 A sqleibniz instruction is prefixed with `@sqleibniz::` and written inside of a

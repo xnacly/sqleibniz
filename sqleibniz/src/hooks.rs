@@ -6,7 +6,13 @@ use crate::{
         storage::SqliteStorageClass,
     },
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
+
+use crate::types::config::DEFAULT_MAX_HOOK_RUNTIME;
 
 trait NodeHookContext {
     fn as_hook_context(&self) -> HookContext;
@@ -131,6 +137,7 @@ fn run_context(
     lua: &mlua::Lua,
     file: &str,
     hooks: &[Hook],
+    max_hook_runtime: Duration,
     ctx: &HookContext,
     errors: &mut Vec<Error>,
 ) {
@@ -156,7 +163,7 @@ fn run_context(
                     }
                 }
 
-                if let Err(err) = hook_fn.call::<()>(ctx.clone()) {
+                if let Err(err) = call_with_timeout(lua, hook_fn, ctx.clone(), max_hook_runtime) {
                     errors.push(hook_error(file, hook, ctx, err));
                 }
             }
@@ -168,8 +175,39 @@ fn run_context(
     }
 
     for child in &ctx.children {
-        run_context(lua, file, hooks, child, errors);
+        run_context(lua, file, hooks, max_hook_runtime, child, errors);
     }
+}
+
+fn call_with_timeout(
+    lua: &mlua::Lua,
+    hook: &mlua::Function,
+    context: HookContext,
+    max_runtime: Duration,
+) -> mlua::Result<()> {
+    let thread = lua.create_thread(hook.clone())?;
+    let started = Instant::now();
+    let timeout_message = format!(
+        "hook exceeded its maximum runtime of {}ms",
+        max_runtime.as_millis()
+    );
+    thread.set_hook(
+        mlua::HookTriggers::new().every_nth_instruction(100),
+        move |_, _| {
+            if started.elapsed() > max_runtime {
+                Err(mlua::Error::runtime(timeout_message.clone()))
+            } else {
+                Ok(mlua::VmState::Continue)
+            }
+        },
+    )?;
+    let result = thread.resume::<()>(context);
+    thread.remove_hook();
+    result?;
+    if thread.is_resumable() {
+        return Err(mlua::Error::runtime("Lua hooks must not yield"));
+    }
+    Ok(())
 }
 
 pub fn run(
@@ -179,10 +217,28 @@ pub fn run(
     ast: &[Box<dyn Node>],
     tokens: &[Token],
 ) -> Vec<Error> {
+    run_with_max_hook_runtime(lua, file, hooks, ast, tokens, DEFAULT_MAX_HOOK_RUNTIME)
+}
+
+pub fn run_with_max_hook_runtime(
+    lua: &mlua::Lua,
+    file: &str,
+    hooks: &[Hook],
+    ast: &[Box<dyn Node>],
+    tokens: &[Token],
+    max_hook_runtime: Duration,
+) -> Vec<Error> {
     let mut errors = vec![];
 
     for node in ast {
-        run_context(lua, file, hooks, &node.as_hook_context(), &mut errors);
+        run_context(
+            lua,
+            file,
+            hooks,
+            max_hook_runtime,
+            &node.as_hook_context(),
+            &mut errors,
+        );
     }
 
     let mut skip_expected_statement = false;
@@ -199,7 +255,14 @@ pub fn run(
             continue;
         }
 
-        run_context(lua, file, hooks, &HookContext::token(token), &mut errors);
+        run_context(
+            lua,
+            file,
+            hooks,
+            max_hook_runtime,
+            &HookContext::token(token),
+            &mut errors,
+        );
     }
 
     errors

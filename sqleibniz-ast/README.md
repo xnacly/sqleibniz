@@ -16,7 +16,7 @@ such as linters, editors, formatters, and source analyzers.
 
 ```toml
 [dependencies]
-sqleibniz-ast = "0.0.2"
+sqleibniz-ast = "0.0.3"
 ```
 
 ## Parse SQL
@@ -69,7 +69,7 @@ Enable the `serde` feature and add a JSON serializer to your application:
 ```toml
 [dependencies]
 serde_json = "1"
-sqleibniz-ast = { version = "0.0.2", features = ["serde"] }
+sqleibniz-ast = { version = "0.0.3", features = ["serde"] }
 ```
 
 AST nodes serialize as JSON objects with a `type` field. This makes the output

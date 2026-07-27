@@ -1,8 +1,49 @@
-use std::fs;
+use std::{fs, time::Duration};
 
 use mlua::{FromLua, Function, Table, UserData};
 
 use super::{ctx::HookContext, rules::Rule};
+
+pub const DEFAULT_MAX_HOOK_RUNTIME: Duration = Duration::from_millis(10);
+
+pub fn parse_max_hook_runtime(value: &str) -> Result<Duration, String> {
+    let milliseconds = value
+        .strip_suffix("ms")
+        .unwrap_or(value)
+        .parse::<u64>()
+        .map_err(|_| {
+            format!(
+                "invalid hook runtime '{value}'; expected a number of milliseconds such as 10ms"
+            )
+        })?;
+    Ok(Duration::from_millis(milliseconds))
+}
+
+fn max_hook_runtime(value: mlua::Value) -> mlua::Result<Duration> {
+    let milliseconds = match value {
+        mlua::Value::Nil => return Ok(DEFAULT_MAX_HOOK_RUNTIME),
+        mlua::Value::Integer(value) if value >= 0 => value as u64,
+        mlua::Value::Number(value)
+            if value.is_finite()
+                && value >= 0.0
+                && value.fract() == 0.0
+                && value <= u64::MAX as f64 =>
+        {
+            value as u64
+        }
+        mlua::Value::String(value) => {
+            return parse_max_hook_runtime(value.to_str()?.as_ref()).map_err(mlua::Error::runtime);
+        }
+        value => {
+            return Err(mlua::Error::FromLuaConversionError {
+                from: value.type_name(),
+                to: "hook runtime in milliseconds".into(),
+                message: Some("expected a non-negative integer or a string such as '10ms'".into()),
+            });
+        }
+    };
+    Ok(Duration::from_millis(milliseconds))
+}
 
 #[derive(Debug)]
 /// Configuration is expected to be at ./leibniz.lua - its existence is not required for the program invocation
@@ -11,6 +52,8 @@ pub struct Config {
     pub disabled_rules: Vec<Rule>,
     /// holds the hooks the user wants to execute
     pub hooks: Option<Vec<Hook>>,
+    /// maximum time a single Lua hook invocation may execute for
+    pub max_hook_runtime: Duration,
 }
 
 impl Default for Config {
@@ -18,6 +61,7 @@ impl Default for Config {
         Self {
             disabled_rules: vec![],
             hooks: None,
+            max_hook_runtime: DEFAULT_MAX_HOOK_RUNTIME,
         }
     }
 }
@@ -46,6 +90,7 @@ impl Config {
         Ok(Self {
             disabled_rules,
             hooks: None,
+            max_hook_runtime: DEFAULT_MAX_HOOK_RUNTIME,
         })
     }
 
@@ -90,9 +135,11 @@ impl FromLua for Config {
             })
             .collect::<mlua::Result<Vec<_>>>()?;
         let hooks: Option<Vec<Hook>> = table.get("hooks").ok();
+        let max_hook_runtime = max_hook_runtime(table.get("max_hook_runtime")?)?;
         Ok(Self {
             disabled_rules,
             hooks,
+            max_hook_runtime,
         })
     }
 }

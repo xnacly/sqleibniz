@@ -3,6 +3,11 @@
 Static analysis and LSP for SQL in Rust. Check for valid syntax, semantics and
 perform dynamic analysis.
 
+<img width="1800" height="650" alt="image" src="https://github.com/user-attachments/assets/5efeb731-ee31-43da-8d44-1195299d572c" />
+<img width="1800" height="650" alt="sqleibniz-complex-error" src="https://github.com/user-attachments/assets/4a7c06fd-381b-4d41-b1c8-d31e6bda3d14" />
+
+
+
 For a standalone SQLite lexer, parser, and AST without sqleibniz added
 layers, use [`sqleibniz-ast`](./sqleibniz-ast/README.md).
 

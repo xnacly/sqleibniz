@@ -1,5 +1,7 @@
 use crate::{
-    analyse::{Analyse, AnalysisContext, Column, RelationKind},
+    analyse::{
+        AnalysisContext, Column, RelationKind, column, relation, relation::relation_diagnostic,
+    },
     error::{Error, Location},
     parser::nodes::{
         Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, SchemaTableContainer,
@@ -30,7 +32,7 @@ pub fn create_table(file: &str, context: &mut AnalysisContext, table: &CreateTab
         table
             .columns
             .iter()
-            .flat_map(|column| column.analyse(file, context)),
+            .flat_map(|column| column::column_def(file, context, column)),
     );
 
     diagnostics.append(&mut nullable_primary_key_diagnostics(file, table));
@@ -58,7 +60,7 @@ pub fn create_table_as(
     context: &mut AnalysisContext,
     table: &CreateTableAs,
 ) -> Vec<Error> {
-    let mut diagnostics = table.select.analyse(file, context);
+    let mut diagnostics = relation::select(file, context, &table.select);
     diagnostics.extend(duplicate_relation_diagnostic(
         file,
         context,
@@ -72,7 +74,7 @@ pub fn create_table_as(
 }
 
 pub fn create_view(file: &str, context: &mut AnalysisContext, view: &CreateView) -> Vec<Error> {
-    let mut diagnostics = view.select.analyse(file, context);
+    let mut diagnostics = relation::select(file, context, &view.select);
     diagnostics.extend(duplicate_relation_diagnostic(
         file,
         context,
@@ -227,11 +229,36 @@ fn nullable_primary_key_error(file: &str, column: &ColumnDef) -> Error {
 }
 
 pub fn alter(file: &str, context: &mut AnalysisContext, alter: &Alter) -> Vec<Error> {
-    alter
-        .add_column
-        .as_ref()
-        .map(|column| column.analyse(file, context))
-        .unwrap_or_default()
+    let mut diagnostics = relation_diagnostic(file, context, &alter.target, alter.location);
+
+    if let Some(column) = &alter.add_column {
+        diagnostics.extend(column::column_def(file, context, column));
+        let _ = context.add_column(&alter.target, Column::from(column));
+    }
+
+    if let (Some(old_name), Some(new_name)) = (&alter.rename_column_target, &alter.new_column_name)
+    {
+        let _ = context.rename_column(&alter.target, old_name, new_name);
+    }
+
+    if let Some(column_name) = &alter.drop_column {
+        let _ = context.drop_column(&alter.target, column_name);
+    }
+
+    if let Some(new_name) = &alter.rename_to {
+        let new_name = match &alter.target {
+            SchemaTableContainer::Table(_) => SchemaTableContainer::Table(new_name.clone()),
+            SchemaTableContainer::SchemaAndTable { schema, .. } => {
+                SchemaTableContainer::SchemaAndTable {
+                    schema: schema.clone(),
+                    table: new_name.clone(),
+                }
+            }
+        };
+        let _ = context.rename_relation(&alter.target, &new_name);
+    }
+
+    diagnostics
 }
 
 #[cfg(test)]

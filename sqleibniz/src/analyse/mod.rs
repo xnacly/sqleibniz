@@ -10,99 +10,93 @@ pub mod relation;
 #[cfg(feature = "trace-analysis")]
 pub(crate) mod trace;
 
-pub use context::{AnalysisContext, Column, Relation, RelationKind};
+pub use context::{
+    AnalysisContext, Column, ColumnKnowledge, Relation, RelationKind, SchemaMutationError,
+};
+
+use std::marker::PhantomData;
 
 use crate::{
     error::Error,
     parser::nodes::{
-        Alter, ColumnDef, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, Delete,
-        Insert, Node, Pragma, Select, Update, With,
+        Alter, CreateTable, CreateTableAs, CreateView, CreateVirtualTable, Delete, Insert, Node,
+        Pragma, Select, Update, With,
     },
 };
 
-pub(crate) trait Analyse {
-    fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error>;
+trait AnalysisPass {
+    fn analyse(&self, file: &str, node: &dyn Node, context: &mut AnalysisContext) -> Vec<Error>;
 }
 
-pub(crate) fn analyse_ast_node(
-    node: &dyn Node,
-    file: &str,
-    context: &mut AnalysisContext,
-) -> Vec<Error> {
-    node.analyse(file, context)
+#[derive(Default)]
+pub(crate) struct AnalysisPipeline {
+    passes: Vec<Box<dyn AnalysisPass>>,
 }
 
-macro_rules! impl_analyse {
-    ($node:ty, $handler:path) => {
-        impl Analyse for $node {
-            fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-                analyse_node(self, file, context, |file, context| {
-                    $handler(file, context, self)
-                })
-            }
-        }
-    };
-}
+impl AnalysisPipeline {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
 
-impl_analyse!(Select, relation::select);
-impl_analyse!(Update, relation::update);
-impl_analyse!(Insert, relation::insert);
-impl_analyse!(Delete, relation::delete);
-impl_analyse!(With, relation::with);
-impl_analyse!(Alter, create::alter);
-impl_analyse!(ColumnDef, column::column_def);
-impl_analyse!(CreateTable, create::create_table);
-impl_analyse!(CreateTableAs, create::create_table_as);
-impl_analyse!(CreateView, create::create_view);
-impl_analyse!(CreateVirtualTable, create::create_virtual_table);
-impl_analyse!(Pragma, pragma::pragma);
-
-impl<T: Analyse + ?Sized> Analyse for Box<T> {
-    fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-        self.as_ref().analyse(file, context)
+    pub(crate) fn on<N, F>(mut self, handler: F) -> Self
+    where
+        N: Node + 'static,
+        F: Fn(&str, &mut AnalysisContext, &N) -> Vec<Error> + 'static,
+    {
+        self.passes.push(Box::new(NodePass {
+            handler,
+            node: PhantomData,
+        }));
+        self
     }
 }
 
-impl Analyse for dyn Node {
-    fn analyse(&self, file: &str, context: &mut AnalysisContext) -> Vec<Error> {
-        macro_rules! dispatch {
-            ($($node:ty),* $(,)?) => {
-                $(
-                    if let Some(node) = self.as_any().downcast_ref::<$node>() {
-                        return node.analyse(file, context);
-                    }
-                )*
-            };
-        }
+struct NodePass<N: Node, F> {
+    handler: F,
+    node: PhantomData<fn(&N)>,
+}
 
-        dispatch!(
-            Select,
-            Update,
-            Insert,
-            Delete,
-            With,
-            Alter,
-            ColumnDef,
-            CreateTable,
-            CreateTableAs,
-            CreateView,
-            CreateVirtualTable,
-            Pragma,
-        );
-        Vec::new()
+impl<N, F> AnalysisPass for NodePass<N, F>
+where
+    N: Node + 'static,
+    F: Fn(&str, &mut AnalysisContext, &N) -> Vec<Error>,
+{
+    fn analyse(&self, file: &str, node: &dyn Node, context: &mut AnalysisContext) -> Vec<Error> {
+        node.as_any()
+            .downcast_ref::<N>()
+            .map(|node| (self.handler)(file, context, node))
+            .unwrap_or_default()
     }
 }
 
 pub fn run(file: &str, ast: &[Box<dyn Node>]) -> Vec<Error> {
+    run_with_pipeline(file, ast, default_pipeline())
+}
+
+pub(crate) fn run_with_pipeline(
+    file: &str,
+    ast: &[Box<dyn Node>],
+    pipeline: AnalysisPipeline,
+) -> Vec<Error> {
     let mut context = AnalysisContext::default();
 
     #[cfg(feature = "trace-analysis")]
     trace::run_start(file, ast.len());
 
-    let diagnostics: Vec<Error> = ast
-        .iter()
-        .flat_map(|node| analyse_ast_node(node.as_ref(), file, &mut context))
-        .collect();
+    let mut diagnostics = Vec::new();
+    for node in ast {
+        for pass in &pipeline.passes {
+            #[cfg(feature = "trace-analysis")]
+            trace::enter_node();
+
+            let pass_diagnostics = pass.analyse(file, node.as_ref(), &mut context);
+
+            #[cfg(feature = "trace-analysis")]
+            trace::exit_node(node.name(), node.location(), &pass_diagnostics);
+
+            diagnostics.extend(pass_diagnostics);
+        }
+    }
 
     #[cfg(feature = "trace-analysis")]
     trace::run_end(diagnostics.len(), &context);
@@ -110,22 +104,17 @@ pub fn run(file: &str, ast: &[Box<dyn Node>]) -> Vec<Error> {
     diagnostics
 }
 
-pub(crate) fn analyse_node(
-    node: &dyn Node,
-    file: &str,
-    context: &mut AnalysisContext,
-    analyse: impl FnOnce(&str, &mut AnalysisContext) -> Vec<Error>,
-) -> Vec<Error> {
-    #[cfg(not(feature = "trace-analysis"))]
-    let _ = node;
-
-    #[cfg(feature = "trace-analysis")]
-    trace::enter_node();
-
-    let diagnostics = analyse(file, context);
-
-    #[cfg(feature = "trace-analysis")]
-    trace::exit_node(node.name(), node.location(), &diagnostics);
-
-    diagnostics
+pub(crate) fn default_pipeline() -> AnalysisPipeline {
+    AnalysisPipeline::new()
+        .on::<Select, _>(relation::select)
+        .on::<Update, _>(relation::update)
+        .on::<Insert, _>(relation::insert)
+        .on::<Delete, _>(relation::delete)
+        .on::<With, _>(relation::with)
+        .on::<Alter, _>(create::alter)
+        .on::<CreateTable, _>(create::create_table)
+        .on::<CreateTableAs, _>(create::create_table_as)
+        .on::<CreateView, _>(create::create_view)
+        .on::<CreateVirtualTable, _>(create::create_virtual_table)
+        .on::<Pragma, _>(pragma::pragma)
 }

@@ -1,5 +1,5 @@
 use crate::{
-    analyse::{Analyse, AnalysisContext, Relation, RelationKind},
+    analyse::{AnalysisContext, ColumnKnowledge, Relation, RelationKind},
     error::{Error, Location},
     parser::nodes::{
         Delete, Expr, Insert, InsertSource, Node, QualifiedTableName, ResultColumn,
@@ -32,7 +32,7 @@ pub fn insert(file: &str, context: &mut AnalysisContext, insert: &Insert) -> Vec
     ));
 
     if let InsertSource::Select(select) = &insert.source {
-        diagnostics.extend(select.analyse(file, context));
+        diagnostics.extend(crate::analyse::relation::select(file, context, select));
     }
 
     diagnostics
@@ -61,7 +61,7 @@ pub fn with(file: &str, context: &mut AnalysisContext, with: &With) -> Vec<Error
     let mut diagnostics = with
         .expressions
         .iter()
-        .flat_map(|expression| expression.select.analyse(file, context))
+        .flat_map(|expression| select(file, context, &expression.select))
         .collect::<Vec<_>>();
 
     diagnostics.extend(analyse_with_child(file, context, with, 0));
@@ -76,7 +76,7 @@ fn analyse_with_child(
     index: usize,
 ) -> Vec<Error> {
     let Some(expression) = with.expressions.get(index) else {
-        return with.child.analyse(file, context);
+        return analyse_with_statement(file, context, with.child.as_ref());
     };
 
     context.with_scoped_relation(
@@ -84,6 +84,30 @@ fn analyse_with_child(
         RelationKind::CommonTableExpression,
         |context| analyse_with_child(file, context, with, index + 1),
     )
+}
+
+fn analyse_with_statement(
+    file: &str,
+    context: &mut AnalysisContext,
+    node: &dyn Node,
+) -> Vec<Error> {
+    if let Some(select) = node.as_any().downcast_ref::<Select>() {
+        return crate::analyse::relation::select(file, context, select);
+    }
+    if let Some(insert) = node.as_any().downcast_ref::<Insert>() {
+        return crate::analyse::relation::insert(file, context, insert);
+    }
+    if let Some(update) = node.as_any().downcast_ref::<Update>() {
+        return crate::analyse::relation::update(file, context, update);
+    }
+    if let Some(delete) = node.as_any().downcast_ref::<Delete>() {
+        return crate::analyse::relation::delete(file, context, delete);
+    }
+    if let Some(with) = node.as_any().downcast_ref::<With>() {
+        return crate::analyse::relation::with(file, context, with);
+    }
+
+    Vec::new()
 }
 
 fn select_source_diagnostics(
@@ -111,7 +135,7 @@ fn qualified_table_diagnostic(
     relation_diagnostic(file, context, &table.name, location)
 }
 
-fn relation_diagnostic(
+pub(crate) fn relation_diagnostic(
     file: &str,
     context: &AnalysisContext,
     relation: &SchemaTableContainer,
@@ -322,7 +346,7 @@ impl SelectScopeSource<'_> {
 }
 
 fn can_validate_columns(relation: &Relation) -> bool {
-    relation.kind == RelationKind::Table && !relation.columns.is_empty()
+    relation.kind == RelationKind::Table && relation.column_knowledge == ColumnKnowledge::Complete
 }
 
 fn relation_has_column(relation: &Relation, column: &str) -> bool {

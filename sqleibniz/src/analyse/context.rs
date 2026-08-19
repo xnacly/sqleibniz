@@ -13,11 +13,27 @@ pub enum RelationKind {
     CommonTableExpression,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnKnowledge {
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaMutationError {
+    UnknownRelation,
+    NotTable,
+    DuplicateColumn,
+    UnknownColumn,
+    DuplicateRelation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Relation {
     pub name: SchemaTableContainer,
     pub kind: RelationKind,
     pub columns: Vec<Column>,
+    pub column_knowledge: ColumnKnowledge,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,7 +49,12 @@ pub struct AnalysisContext {
 
 impl AnalysisContext {
     pub fn define_relation(&mut self, name: &SchemaTableContainer, kind: RelationKind) {
-        self.define_relation_with_columns(name, kind, Vec::new());
+        self.define_relation_with_column_knowledge(
+            name,
+            kind,
+            Vec::new(),
+            ColumnKnowledge::Partial,
+        );
     }
 
     pub fn contains_relation(&self, name: &SchemaTableContainer) -> bool {
@@ -46,6 +67,16 @@ impl AnalysisContext {
         kind: RelationKind,
         columns: Vec<Column>,
     ) {
+        self.define_relation_with_column_knowledge(name, kind, columns, ColumnKnowledge::Complete);
+    }
+
+    fn define_relation_with_column_knowledge(
+        &mut self,
+        name: &SchemaTableContainer,
+        kind: RelationKind,
+        columns: Vec<Column>,
+        column_knowledge: ColumnKnowledge,
+    ) {
         #[cfg(feature = "trace-analysis")]
         crate::analyse::trace::define_relation(name, kind, &columns);
 
@@ -55,6 +86,7 @@ impl AnalysisContext {
                 name: name.clone(),
                 kind,
                 columns,
+                column_knowledge,
             },
         );
     }
@@ -74,6 +106,101 @@ impl AnalysisContext {
         self.relations.values()
     }
 
+    pub fn add_column(
+        &mut self,
+        name: &SchemaTableContainer,
+        column: Column,
+    ) -> Result<(), SchemaMutationError> {
+        let Some(relation) = self.relations.get_mut(&relation_key(name)) else {
+            return Err(SchemaMutationError::UnknownRelation);
+        };
+
+        if relation.kind != RelationKind::Table {
+            return Err(SchemaMutationError::NotTable);
+        }
+
+        if relation
+            .columns
+            .iter()
+            .any(|known| known.name.eq_ignore_ascii_case(&column.name))
+        {
+            return Err(SchemaMutationError::DuplicateColumn);
+        }
+
+        relation.columns.push(column);
+        Ok(())
+    }
+
+    pub fn rename_column(
+        &mut self,
+        name: &SchemaTableContainer,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), SchemaMutationError> {
+        let Some(relation) = self.relations.get_mut(&relation_key(name)) else {
+            return Err(SchemaMutationError::UnknownRelation);
+        };
+
+        let Some(index) = relation
+            .columns
+            .iter()
+            .position(|column| column.name.eq_ignore_ascii_case(old_name))
+        else {
+            return Err(SchemaMutationError::UnknownColumn);
+        };
+
+        if relation
+            .columns
+            .iter()
+            .any(|known| known.name.eq_ignore_ascii_case(new_name))
+        {
+            return Err(SchemaMutationError::DuplicateColumn);
+        }
+
+        relation.columns[index].name = new_name.into();
+        Ok(())
+    }
+
+    pub fn drop_column(
+        &mut self,
+        name: &SchemaTableContainer,
+        column_name: &str,
+    ) -> Result<(), SchemaMutationError> {
+        let Some(relation) = self.relations.get_mut(&relation_key(name)) else {
+            return Err(SchemaMutationError::UnknownRelation);
+        };
+
+        let Some(index) = relation
+            .columns
+            .iter()
+            .position(|column| column.name.eq_ignore_ascii_case(column_name))
+        else {
+            return Err(SchemaMutationError::UnknownColumn);
+        };
+
+        relation.columns.remove(index);
+        Ok(())
+    }
+
+    pub fn rename_relation(
+        &mut self,
+        old_name: &SchemaTableContainer,
+        new_name: &SchemaTableContainer,
+    ) -> Result<(), SchemaMutationError> {
+        let old_key = relation_key(old_name);
+        let new_key = relation_key(new_name);
+        if old_key != new_key && self.relations.contains_key(&new_key) {
+            return Err(SchemaMutationError::DuplicateRelation);
+        }
+
+        let Some(mut relation) = self.relations.remove(&old_key) else {
+            return Err(SchemaMutationError::UnknownRelation);
+        };
+        relation.name = new_name.clone();
+        self.relations.insert(new_key, relation);
+        Ok(())
+    }
+
     pub(crate) fn with_scoped_relation<T>(
         &mut self,
         name: &SchemaTableContainer,
@@ -87,6 +214,7 @@ impl AnalysisContext {
                 name: name.clone(),
                 kind,
                 columns: Vec::new(),
+                column_knowledge: ColumnKnowledge::Partial,
             },
         );
 

@@ -22,11 +22,11 @@ dynamic correctness. See below for a list of currently implemented features.
 
 ### Supported features
 
-- [ ] static analysis (syntax and semantic analysis)
+- [x] static analysis (syntax and semantic analysis)
   - [x] syntax analysis - sqleibniz aims to implement the syntax [sqlite understands](https://www.sqlite.org/lang.html)
   - [x] warn for sqlites [quirks](https://www.sqlite.org/quirks.html)
-  - [ ] do the used tables exist / were they created beforehand
-  - [ ] do the used columns exist / were they created beforehand
+  - [x] check tables, views, virtual tables, and CTEs referenced after they are defined in the same file
+  - [x] check columns on previously defined tables when their schema can be determined unambiguously
   - [ ] do the used functions exist / were they created beforehand
   - [ ] are all used types compatible
 - [ ] dynamic analysis (runtime analysis via embedded sqlite)
